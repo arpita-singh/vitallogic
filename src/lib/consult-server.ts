@@ -1,27 +1,67 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { createClient } from "@supabase/supabase-js";
+import { createHash, randomBytes } from "crypto";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Database } from "@/integrations/supabase/types";
 
 /**
- * Build a Supabase client that respects RLS. If the caller is signed in,
- * forward their bearer token so auth.uid() works inside policies; if not,
- * fall back to the anon role (which our `Consults: anyone can insert`
- * policy allows when user_id is null).
+ * Hash an anon token with SHA-256. We only ever store the hash on the row;
+ * the raw token lives in the original browser's storage and travels in
+ * server-function inputs.
  */
-function getSupabaseForRequest() {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY");
-  }
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Verify the bearer JWT (if any) and return the verified user id, or null.
+ * We never trust client-supplied user ids — they're always re-derived from
+ * the token server-side.
+ */
+async function getVerifiedUserId(): Promise<string | null> {
   const request = getRequest();
-  const authHeader = request?.headers?.get("authorization") ?? undefined;
-  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    global: authHeader ? { headers: { Authorization: authHeader } } : undefined,
-    auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
-  });
+  const authHeader = request?.headers?.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice("Bearer ".length);
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data?.user) return null;
+  return data.user.id;
+}
+
+/**
+ * Verify that the caller is allowed to read/modify a given consult. Returns
+ * { ok: true, userId } when authorized via JWT, { ok: true, userId: null }
+ * when authorized via matching anon token, or throws "Unauthorized" otherwise.
+ */
+async function authorizeConsultAccess(
+  consultId: string,
+  anonToken?: string,
+): Promise<{ userId: string | null; ownerUserId: string | null }> {
+  const { data: row, error } = await supabaseAdmin
+    .from("consults")
+    .select("user_id, anon_token_hash")
+    .eq("id", consultId)
+    .maybeSingle();
+  if (error || !row) throw new Error("Consult not found");
+
+  const verifiedUserId = await getVerifiedUserId();
+
+  // Signed-in owner
+  if (verifiedUserId && row.user_id === verifiedUserId) {
+    return { userId: verifiedUserId, ownerUserId: row.user_id };
+  }
+
+  // Anonymous owner with matching token
+  if (
+    !row.user_id &&
+    anonToken &&
+    row.anon_token_hash &&
+    hashToken(anonToken) === row.anon_token_hash
+  ) {
+    return { userId: null, ownerUserId: null };
+  }
+
+  throw new Error("Unauthorized");
 }
 
 export type Intake = {
@@ -61,75 +101,103 @@ function intakeSummary(intake: Intake): string {
 }
 
 /**
- * Start a consult. Works for anonymous AND signed-in users.
- *
- * Strategy: always insert with user_id = NULL (the public anon-insert RLS
- * policy allows this for everyone). If the caller is signed in, verify their
- * bearer token server-side and transfer ownership immediately. We don't trust
- * the userId field from client input — it's re-derived from the JWT.
+ * Start a consult. For anonymous callers we mint a random per-browser
+ * `anonToken` and store its SHA-256 hash on the row. The raw token is
+ * returned exactly once — the browser must persist it to talk to this
+ * consult later. For signed-in callers, we attribute the consult to the
+ * verified user id immediately and skip the token entirely.
  */
 export const startConsult = createServerFn({ method: "POST" })
   .inputValidator((data: { intake: Intake; userId?: string | null }) => data)
   .handler(async ({ data }) => {
     const { intake } = data;
-    const supabase = getSupabaseForRequest();
-
-    // Note: we generate the id ourselves because there's no SELECT RLS policy
-    // that lets anonymous callers read back a freshly-inserted row, so .select()
-    // after .insert() would fail.
     const consultId = crypto.randomUUID();
-    const { error } = await supabase
-      .from("consults")
-      .insert({ id: consultId, intake: intake as never, user_id: null, status: "draft" });
+    const verifiedUserId = await getVerifiedUserId();
 
+    let anonToken: string | undefined;
+    let anonTokenHash: string | null = null;
+    if (!verifiedUserId) {
+      anonToken = randomBytes(32).toString("base64url");
+      anonTokenHash = hashToken(anonToken);
+    }
+
+    // Use the admin client so we don't need a public RLS path for inserts.
+    const { error } = await supabaseAdmin.from("consults").insert({
+      id: consultId,
+      intake: intake as never,
+      user_id: verifiedUserId,
+      anon_token_hash: anonTokenHash,
+      status: "draft",
+    });
     if (error) {
       console.error("startConsult insert failed", error);
       throw new Error("Could not start consult");
     }
-    const consult = { id: consultId };
 
-    // Seed a system message with the intake summary so the AI has context.
-    const { error: msgErr } = await supabase.from("consult_messages").insert({
-      consult_id: consult.id,
+    // Seed system message with the intake summary.
+    const { error: msgErr } = await supabaseAdmin.from("consult_messages").insert({
+      consult_id: consultId,
       role: "system",
       content: intakeSummary(intake),
+      anon_token_hash: anonTokenHash,
     });
     if (msgErr) console.error("seed system message failed", msgErr);
 
-    // Auto-claim for signed-in callers (verify token rather than trusting input).
-    const request = getRequest();
-    const authHeader = request?.headers?.get("authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.slice("Bearer ".length);
-      const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-      if (userErr) console.error("auto-claim getUser failed", userErr);
-      const verifiedUserId = userData?.user?.id;
-      if (verifiedUserId) {
-        const { error: claimErr } = await supabase
-          .from("consults")
-          .update({ user_id: verifiedUserId })
-          .eq("id", consult.id)
-          .is("user_id", null);
-        if (claimErr) console.error("auto-claim consult failed", claimErr);
-      }
-    }
+    return { consultId, anonToken };
+  });
 
-    return { consultId: consult.id as string };
+/**
+ * Read a consult (intake summary + messages + prescription status snapshot).
+ * Replaces direct Supabase reads from the browser, which are no longer
+ * permitted by RLS for anonymous consults.
+ */
+export const getConsult = createServerFn({ method: "POST" })
+  .inputValidator((data: { consultId: string; anonToken?: string }) => data)
+  .handler(async ({ data }) => {
+    const { ownerUserId } = await authorizeConsultAccess(data.consultId, data.anonToken);
+
+    const [{ data: consultRow }, { data: msgs }, { data: rxRows }] = await Promise.all([
+      supabaseAdmin
+        .from("consults")
+        .select("id, intake, user_id, status")
+        .eq("id", data.consultId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("consult_messages")
+        .select("role, content, created_at")
+        .eq("consult_id", data.consultId)
+        .order("created_at", { ascending: true }),
+      supabaseAdmin
+        .from("prescriptions")
+        .select("id, status")
+        .eq("consult_id", data.consultId),
+    ]);
+
+    return {
+      consult: consultRow,
+      messages: msgs ?? [],
+      prescriptions: rxRows ?? [],
+      ownerUserId,
+    };
   });
 
 /**
  * Save patient contact info onto an existing consult's intake JSON.
- * Used for anonymous consults so the practitioner can reach them when
- * the prescription is approved. Works without auth — RLS lets anyone
- * update rows where user_id is still null.
+ * Requires either signed-in ownership or matching anon token.
  */
 export const saveConsultContact = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: { consultId: string; contactEmail: string; contactName?: string }) => data,
+    (data: {
+      consultId: string;
+      contactEmail: string;
+      contactName?: string;
+      anonToken?: string;
+    }) => data,
   )
   .handler(async ({ data }) => {
-    const supabase = getSupabaseForRequest();
-    const { data: row, error: fetchErr } = await supabase
+    await authorizeConsultAccess(data.consultId, data.anonToken);
+
+    const { data: row, error: fetchErr } = await supabaseAdmin
       .from("consults")
       .select("intake")
       .eq("id", data.consultId)
@@ -143,7 +211,7 @@ export const saveConsultContact = createServerFn({ method: "POST" })
       contactEmail: data.contactEmail,
       contactName: data.contactName ?? null,
     };
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("consults")
       .update({ intake: nextIntake as never })
       .eq("id", data.consultId);
@@ -155,20 +223,53 @@ export const saveConsultContact = createServerFn({ method: "POST" })
   });
 
 /**
- * Claim an anonymous consult for the signed-in user.
+ * Claim an anonymous consult for the signed-in user. The caller must prove
+ * ownership of the anonymous consult by presenting the anon token (or the
+ * consult must already have no owner, which is our existing best-effort
+ * recovery path for users whose token was lost). We additionally require
+ * the verified JWT.
  */
 export const claimConsult = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { consultId: string }) => data)
+  .inputValidator((data: { consultId: string; anonToken?: string }) => data)
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { error } = await supabase
+    const { userId } = context;
+
+    // Prefer token-verified claim — strongest proof of ownership.
+    if (data.anonToken) {
+      const { data: row } = await supabaseAdmin
+        .from("consults")
+        .select("anon_token_hash, user_id")
+        .eq("id", data.consultId)
+        .maybeSingle();
+      if (
+        row &&
+        row.user_id === null &&
+        row.anon_token_hash &&
+        hashToken(data.anonToken) === row.anon_token_hash
+      ) {
+        const { error } = await supabaseAdmin
+          .from("consults")
+          .update({ user_id: userId })
+          .eq("id", data.consultId)
+          .is("user_id", null);
+        if (error) {
+          console.error("claimConsult (token) failed", error);
+          return { ok: false };
+        }
+        return { ok: true };
+      }
+    }
+
+    // Fallback: claim only if the consult is still unowned. RLS already
+    // restricts UPDATE to (user_id IS NULL) for the authenticated role.
+    const { error } = await supabaseAdmin
       .from("consults")
       .update({ user_id: userId })
       .eq("id", data.consultId)
       .is("user_id", null);
     if (error) {
-      console.error("claimConsult failed", error);
+      console.error("claimConsult (fallback) failed", error);
       return { ok: false };
     }
     return { ok: true };

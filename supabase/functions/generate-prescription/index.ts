@@ -95,11 +95,19 @@ const tool = {
   },
 };
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { consultId } = await req.json();
+    const { consultId, anonToken } = await req.json();
     if (!consultId) {
       return new Response(JSON.stringify({ error: "Missing consultId" }), {
         status: 400,
@@ -118,12 +126,33 @@ Deno.serve(async (req) => {
     // Pull intake + history
     const { data: consult, error: cErr } = await supabase
       .from("consults")
-      .select("id, intake")
+      .select("id, intake, user_id, anon_token_hash")
       .eq("id", consultId)
       .maybeSingle();
     if (cErr || !consult) {
       return new Response(JSON.stringify({ error: "Consult not found" }), {
         status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Authorize: signed-in owner OR matching anonToken.
+    let authorized = false;
+    const authHeader = req.headers.get("authorization") ?? "";
+    if (authHeader.startsWith("Bearer ") && consult.user_id) {
+      const token = authHeader.slice("Bearer ".length);
+      const { data: userData } = await supabase.auth.getUser(token);
+      if (userData?.user?.id && userData.user.id === consult.user_id) {
+        authorized = true;
+      }
+    }
+    if (!authorized && anonToken && consult.anon_token_hash) {
+      const candidate = await sha256Hex(anonToken);
+      if (candidate === consult.anon_token_hash) authorized = true;
+    }
+    if (!authorized) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

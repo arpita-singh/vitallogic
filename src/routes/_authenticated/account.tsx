@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
-import { claimPendingConsult, getPendingConsult } from "@/lib/claim-consult";
+import { claimPendingConsult, getPendingConsultId } from "@/lib/claim-consult";
 
 type AccountSearch = { ready?: number };
 
@@ -67,7 +67,7 @@ function AccountPage() {
       // If after claiming there's still a pending pointer (e.g. claim failed
       // because a different account owns it), surface a fallback notice.
       if (!claimed) {
-        const stillPending = getPendingConsult();
+        const stillPending = getPendingConsultId();
         if (stillPending) setPendingOrphan(stillPending);
       }
     };

@@ -56,12 +56,14 @@ function ConsultPage() {
   const handleComplete = async (intake: Intake) => {
     setSubmitting(true);
     try {
-      const { consultId } = await startConsult({
+      const { consultId, anonToken } = await startConsult({
         data: { intake, userId: user?.id ?? null },
       });
       // Stash for anonymous → account claim later (unified helper).
+      // The anonToken is required to read/update the consult later, so it
+      // must be stored alongside the consultId.
       if (!user) {
-        rememberPendingConsult(consultId);
+        rememberPendingConsult(consultId, anonToken);
       }
       toast.success("Intake submitted — we'll email you when your recommendation is ready.");
       navigate({ to: "/consult/$consultId", params: { consultId } });

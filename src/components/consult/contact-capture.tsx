@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Mail, CheckCircle2 } from "lucide-react";
 import { saveConsultContact } from "@/lib/consult-server";
+import { getAnonTokenFor } from "@/lib/claim-consult";
 
 export function ContactCapture({ consultId }: { consultId: string }) {
   const [email, setEmail] = useState("");
@@ -19,6 +20,7 @@ export function ContactCapture({ consultId }: { consultId: string }) {
           consultId,
           contactEmail: email.trim(),
           contactName: name.trim() || undefined,
+          anonToken: getAnonTokenFor(consultId),
         },
       });
       setSaved(true);

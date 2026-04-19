@@ -1,5 +1,7 @@
 // Streaming SSE chat for the Vital Logic AI consult.
-// Public function — anonymous consults allowed.
+// Public function — anonymous consults allowed, but only when the caller
+// presents either (a) the anonToken whose hash matches the consult, or
+// (b) a valid bearer JWT for the consult's owner.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
 const corsHeaders = {
@@ -41,14 +43,65 @@ DISCLAIMERS (weave naturally — never legal-sounding):
 
 Format responses in clean markdown with short paragraphs and the occasional list. Avoid headings — keep it conversational.`;
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { consultId, messages } = await req.json();
+    const { consultId, messages, anonToken } = await req.json();
     if (!consultId || !Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Missing consultId or messages" }), {
         status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    // Authorize: caller must be the signed-in owner OR present a valid anonToken.
+    const { data: consultRow, error: consultErr } = await supabase
+      .from("consults")
+      .select("id, user_id, anon_token_hash")
+      .eq("id", consultId)
+      .maybeSingle();
+    if (consultErr || !consultRow) {
+      return new Response(JSON.stringify({ error: "Consult not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let authorized = false;
+    let storedHash: string | null = consultRow.anon_token_hash ?? null;
+
+    // Try JWT
+    const authHeader = req.headers.get("authorization") ?? "";
+    if (authHeader.startsWith("Bearer ") && consultRow.user_id) {
+      const token = authHeader.slice("Bearer ".length);
+      const { data: userData } = await supabase.auth.getUser(token);
+      if (userData?.user?.id && userData.user.id === consultRow.user_id) {
+        authorized = true;
+      }
+    }
+    // Try anonToken
+    if (!authorized && anonToken && storedHash) {
+      const candidate = await sha256Hex(anonToken);
+      if (candidate === storedHash) authorized = true;
+    }
+
+    if (!authorized) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -97,16 +150,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Persist last user message immediately (fire-and-forget)
+    // Persist last user message immediately (fire-and-forget). Includes the
+    // anon_token_hash so the row stays bound to the original consult.
     const lastUser = [...messages].reverse().find((m: { role: string }) => m.role === "user");
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
     if (lastUser?.content) {
       supabase
         .from("consult_messages")
-        .insert({ consult_id: consultId, role: "user", content: lastUser.content })
+        .insert({
+          consult_id: consultId,
+          role: "user",
+          content: lastUser.content,
+          anon_token_hash: storedHash,
+        })
         .then(({ error }) => {
           if (error) console.error("insert user message failed", error);
         });
@@ -115,7 +170,6 @@ Deno.serve(async (req) => {
     // Tee the stream so we can persist the final assistant message after streaming
     const [clientStream, persistStream] = upstream.body.tee();
 
-    // Background task: collect assistant text, then insert
     (async () => {
       const reader = persistStream.getReader();
       const decoder = new TextDecoder();
@@ -149,7 +203,12 @@ Deno.serve(async (req) => {
       if (assistantText.trim()) {
         const { error } = await supabase
           .from("consult_messages")
-          .insert({ consult_id: consultId, role: "assistant", content: assistantText });
+          .insert({
+            consult_id: consultId,
+            role: "assistant",
+            content: assistantText,
+            anon_token_hash: storedHash,
+          });
         if (error) console.error("insert assistant message failed", error);
       }
     })().catch((e) => console.error("persist stream error", e));

@@ -55,6 +55,7 @@ export type Database = {
       }
       consult_messages: {
         Row: {
+          anon_token_hash: string | null
           consult_id: string
           content: string
           created_at: string
@@ -62,6 +63,7 @@ export type Database = {
           role: Database["public"]["Enums"]["message_role"]
         }
         Insert: {
+          anon_token_hash?: string | null
           consult_id: string
           content: string
           created_at?: string
@@ -69,6 +71,7 @@ export type Database = {
           role: Database["public"]["Enums"]["message_role"]
         }
         Update: {
+          anon_token_hash?: string | null
           consult_id?: string
           content?: string
           created_at?: string
@@ -87,6 +90,7 @@ export type Database = {
       }
       consults: {
         Row: {
+          anon_token_hash: string | null
           created_at: string
           id: string
           intake: Json
@@ -95,6 +99,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          anon_token_hash?: string | null
           created_at?: string
           id?: string
           intake?: Json
@@ -103,6 +108,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          anon_token_hash?: string | null
           created_at?: string
           id?: string
           intake?: Json
