@@ -1,71 +1,51 @@
 
 
-## Fix — `prescriptions_realtime_no_rls_channel_auth`
+## Fix — `has_role_ignores_user_id_parameter`
 
-### Root cause
-The `prescriptions` table is in the `supabase_realtime` publication, so any authenticated client can `supabase.channel(...).on('postgres_changes', { table: 'prescriptions' })` and receive every row change — including `draft`, `final`, `review_notes`. Postgres-level RLS on `prescriptions` does not gate Realtime broadcast; Realtime needs its own authorization on `realtime.messages`.
+### Background
+In an earlier pass we hardened `has_role` against role enumeration by making the body always check `auth.uid()` and ignoring the `_user_id` argument. The scanner now (correctly) flags the opposite risk: the function lies about what it does. If a future RLS policy ever passes a non-caller uuid (e.g. to check whether a target resource's owner has a role), it will silently return the caller's role instead — a subtle, dangerous correctness bug.
 
-### Investigation
-Let me first check whether the app actually uses Realtime on `prescriptions` — if nothing subscribes, the simplest fix is to remove the table from the publication entirely.
-
-Searching: `src/routes/_authenticated/_expert/expert.tsx`, `expert_.$prescriptionId.tsx`, `consult_.$consultId.index.tsx`, `consult_.$consultId.result.tsx` for `.channel(` / `postgres_changes` / `prescriptions`.
-
-Based on the codebase index (no realtime subscriptions visible in the earlier excerpts of `consult_.$consultId.index.tsx` / `result.tsx`, and the expert dashboard polls via queries), I'll verify this in the implementation pass. Two scenarios:
-
-- **Scenario A (likely): no client uses Realtime on `prescriptions`.** Drop the table from the `supabase_realtime` publication. No app changes. Closes the finding completely.
-- **Scenario B: something does subscribe.** Keep it published but enable Realtime Authorization and add RLS policies on `realtime.messages` that only permit topics like `prescription:<consult_id>` for the consult owner or for users with `expert`/`admin` role.
-
-### Plan
-
-**Step 1 — Migration (always run):** Remove `prescriptions` from the realtime publication. This is the safest default and matches what the code appears to do (no live subscription needed; expert reviews via fetch + manual refresh).
+### Fix
+Make `has_role` honour its parameter again, but close the enumeration vector at the permission layer instead of inside the function body.
 
 ```sql
-alter publication supabase_realtime drop table public.prescriptions;
-```
-
-Also do the same for `consult_messages` and `consults` if they're in the publication and unused — I'll check during implementation and only drop ones that are actually published and unused.
-
-**Step 2 — Only if Scenario B turns out to be true** (a Realtime subscription on `prescriptions` exists in the client and removing it would break UX): keep the publication and instead enable Realtime Authorization with RLS on `realtime.messages`:
-
-```sql
--- Enable Realtime Authorization
-alter table realtime.messages enable row level security;
-
-create policy "Realtime: experts/admins can read prescription topics"
-on realtime.messages for select to authenticated
-using (
-  realtime.topic() like 'prescription:%'
-  and (has_role(auth.uid(), 'expert') or has_role(auth.uid(), 'admin'))
-);
-
-create policy "Realtime: owner can read own prescription topics"
-on realtime.messages for select to authenticated
-using (
-  realtime.topic() like 'prescription:%'
-  and exists (
-    select 1 from public.prescriptions p
-    join public.consults c on c.id = p.consult_id
-    where 'prescription:' || p.consult_id::text = realtime.topic()
-      and c.user_id = auth.uid()
+create or replace function public.has_role(_user_id uuid, _role public.app_role)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.user_roles
+    where user_id = _user_id
+      and role    = _role
   )
-);
+$$;
+
+-- Lock down direct RPC access; RLS policies still call it fine because
+-- SECURITY DEFINER runs as the function owner.
+revoke all on function public.has_role(uuid, public.app_role) from public, anon, authenticated;
 ```
-And refactor any client subscriptions to use private channels with `topic = 'prescription:<consult_id>'`.
+
+Why this is safe:
+- All existing RLS policies pass `auth.uid()` (verified across the schema dump) → behaviour unchanged for legitimate access checks.
+- `SECURITY DEFINER` means RLS evaluation continues to execute the function regardless of `EXECUTE` grants to the calling role — Postgres only checks `EXECUTE` for direct invocations (RPC / ad-hoc SQL), not for references inside policies executed by the planner.
+- Revoking `EXECUTE` from `authenticated`/`anon`/`public` removes the PostgREST RPC enumeration surface entirely. A signed-in user calling `supabase.rpc('has_role', { _user_id: '<other>', _role: 'admin' })` now gets `permission denied for function has_role`.
 
 ### Files to change
-- New migration: `supabase/migrations/<ts>_lock_prescriptions_realtime.sql`
-- (Scenario B only) any route file that subscribes to `prescriptions` realtime
+- New migration: `supabase/migrations/<ts>_restore_has_role_param.sql`
 
-### Quick runtime-error note (also from current preview)
-The `Missing Supabase server environment variables` error in `client.server.ts` is unrelated to this finding but is breaking pages right now. I'll relax the lookup to also accept `import.meta.env.SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` as fallbacks before throwing, so SSR doesn't crash when the Worker's `process.env` shim is empty. Small, contained fix in the same pass.
+### Verification
+- App-side role checks (route guards, expert dashboard, RLS on every table) keep working — they all run through policies, not direct RPC.
+- Direct RPC enumeration is rejected with `permission denied`.
+- Scanner finding `has_role_ignores_user_id_parameter` clears.
+
+### Side fix (runtime error in preview)
+The current preview shows `Missing Supabase server environment variables` from `src/integrations/supabase/client.server.ts`. I'll add `import.meta.env` fallbacks (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) before throwing so SSR stops crashing in the Worker when `process.env` is empty. Small, contained; same pass.
 
 ### Out of scope (separate findings)
-- `has_role_ignores_user_id_parameter` (warn) — already neutralized for the exploit path; can revisit signature later.
-- `claim_consult_idor` — already fixed in the previous pass; will mark as resolved.
-- `consult_messages` anonymous read/write hardening.
-
-### Expected result
-- `prescriptions` no longer broadcasts row changes to arbitrary subscribers.
-- Security scan no longer reports `prescriptions_realtime_no_rls_channel_auth`.
-- No UX regression (expert dashboard already fetches on demand).
+- `consult_messages` anonymous read/write hardening
+- `user_purchases` owner UPDATE scope tightening
 
