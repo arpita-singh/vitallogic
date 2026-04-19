@@ -30,7 +30,9 @@ type Row = {
   claimed_by: string | null;
   consult_id: string;
   draft: { red_flags?: string[] } | null;
-  consults: { intake: { symptoms?: string[] } | null } | null;
+  consults: {
+    intake: { symptoms?: string[]; contactName?: string; contactEmail?: string } | null;
+  } | null;
 };
 
 const TAB_LABELS: Record<Filter, string> = {
@@ -72,6 +74,8 @@ function ExpertDashboard() {
         consult_id: r.consult_id,
         symptoms: r.consults?.intake?.symptoms ?? [],
         red_flags: r.draft?.red_flags ?? [],
+        contactName: r.consults?.intake?.contactName ?? null,
+        contactEmail: r.consults?.intake?.contactEmail ?? null,
       }));
       setItems(mapped);
     }

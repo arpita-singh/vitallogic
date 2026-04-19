@@ -320,6 +320,8 @@ function ReviewPage() {
                 {authorName}
               </p>
               <dl className="mt-4 space-y-2 text-sm">
+                <IntakeRow label="Contact name" value={consult.intake.contactName} />
+                <IntakeRow label="Contact email" value={consult.intake.contactEmail} />
                 <IntakeRow label="Symptoms" value={consult.intake.symptoms?.join(", ")} />
                 <IntakeRow label="Notes" value={consult.intake.symptomsNote} />
                 <IntakeRow label="Duration" value={consult.intake.duration} />
