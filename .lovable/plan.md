@@ -1,40 +1,55 @@
 
 
-# Test plan — manual two-window expert flow
+## What's actually happening
 
-## What I'll do (once approved)
+The contact-capture form **does** exist and **is** wired up — but it only appears on the **result page** *after* a prescription has been generated. Looking at the database, none of your test consults have a prescription yet (all are `status: draft`). So the form never had a chance to render, and no contact details exist for the expert queue to display.
 
-1. **Wait for your email.** You sign up at `/signup` in the preview, then tell me the email you used. (I can't grant a role to an account that doesn't exist yet.)
-2. **Grant expert role** via a one-line migration:
-   ```sql
-   insert into public.user_roles (user_id, role)
-   select id, 'expert'::app_role from auth.users where email = '<your-email>';
-   ```
-3. **Verify** with a `read_query` showing your account now has `expert` in `user_roles`, and confirm "Expert" link appears in the header on refresh.
+The `ContactCapture` component renders inside `consult.$consultId.result.tsx`, gated by:
+1. `!user` (anonymous only), AND
+2. `rx.status === 'pending_review' || 'escalated'` (a prescription must exist)
 
-## What you'll do (manual two-window test)
+So you've never seen it because the test flow stops at the chat screen — you'd need to send 3+ replies and click **Generate my recommendation** to reach the page where the form lives.
 
-**Window A — anonymous user** (incognito / private window so no session):
-1. Go to `/consult` → complete the 5-step intake → "Begin consult"
-2. Send 3+ messages in the chat → click "Generate my recommendation"
-3. Land on `/consult/$id/result` showing the pulsing lotus "Awaiting human review" card. **Leave this tab open and visible.**
+This is a UX problem, not a "Phase 5 feature." The fix is simple: **also collect contact details on the chat page**, so anonymous patients can leave their email at any point — not only after generation.
 
-**Window B — expert** (your normal logged-in window):
-1. Go to `/expert` → see the new pending item appear in the queue (realtime)
-2. Open it → click **Claim for review** → edit nothing or tweak a field → **Approve**
-3. **Switch back to Window A** without refreshing.
+## The plan
 
-## Pass criteria
+### 1. Add `ContactCapture` to the chat page (anonymous users only)
 
-- ✅ Window A transitions from "Awaiting review" → green "Approved by a practitioner" view automatically (realtime channel on `prescriptions` filtered by `consult_id`).
-- ✅ Audit trail panel on the expert detail page shows two rows: `Claimed for review` then `Approved`, both attributed to your account.
-- ✅ `prescription_audit` table contains both rows (I'll verify with a SQL read after you confirm).
+In `src/routes/consult.$consultId.tsx`, render a compact contact-capture banner for anonymous users right under the status banner. This way the patient sees it the moment they enter the chat — well before they generate a recommendation.
 
-## If it doesn't auto-update
+```text
+┌────────────────────────────────────────┐
+│ Consult started.  Chat for a few...    │  ← existing
+├────────────────────────────────────────┤
+│ ✉  How should we reach you?            │  ← NEW (anon only)
+│    [name] [email]  [Save]              │
+├────────────────────────────────────────┤
+│ Intake summary  ▾                      │  ← existing
+└────────────────────────────────────────┘
+```
 
-Likely cause: realtime publication doesn't include `prescriptions`. The Phase 4 migration enabled it, but I'll re-check `pg_publication_tables` and re-add if missing. No code change expected.
+After saving, it collapses to a small "We'll email you at x@y.com ✓" pill so it doesn't take up space.
 
-## Reply with
+### 2. Detect anonymous state correctly
 
-Just your signup email. I'll handle the role grant and verification, then you run the two-window test.
+Use the existing `useAuth()` hook (already imported in the result page) to check `!user`. Skip the form entirely for signed-in users — their email is already on their profile.
+
+### 3. Hide the duplicate on the result page when already captured
+
+On the result page, only render `<ContactCapture>` if the consult's intake doesn't already have `contactEmail`. Fetch that alongside the prescription so we don't ask twice.
+
+### 4. Show "Pending contact" hint to experts
+
+Tiny polish: in `queue-card.tsx`, when an anonymous consult has no `contactEmail` yet, show a subtle "No contact yet" label instead of an empty contact block, so experts know the patient can't be reached.
+
+## Files to change
+
+- `src/routes/consult.$consultId.tsx` — render `ContactCapture` for anonymous users; fetch consult intake to check if email already exists.
+- `src/routes/consult.$consultId.result.tsx` — only show `ContactCapture` if no `contactEmail` saved yet.
+- `src/components/expert/queue-card.tsx` — show "No contact yet" label when anonymous and no email.
+
+## Why no Phase 5 needed
+
+You asked whether Phase 5+ is required — no. Contact capture is fully implemented backend-wise (server function `saveConsultContact`, RLS policy for anonymous updates, expert queue mapping). The only gap is the form was placed too late in the funnel. Moving it forward to the chat page closes the loop.
 
