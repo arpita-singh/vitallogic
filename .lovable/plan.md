@@ -1,74 +1,40 @@
 
 
-# Phase 4 — Expert Review Dashboard
+# Test plan — manual two-window expert flow
 
-## 1. Schema additions (1 small migration)
+## What I'll do (once approved)
 
-- Add `claimed_by uuid` + `claimed_at timestamptz` to `prescriptions` (nullable). Used to lock a prescription to one expert during review so two experts don't double-edit.
-- Add RLS policy `Prescriptions: experts can update claim` (already covered by existing experts-can-update-all, so no new policy needed — just the columns).
-- No other schema changes; `prescription_audit` already exists.
+1. **Wait for your email.** You sign up at `/signup` in the preview, then tell me the email you used. (I can't grant a role to an account that doesn't exist yet.)
+2. **Grant expert role** via a one-line migration:
+   ```sql
+   insert into public.user_roles (user_id, role)
+   select id, 'expert'::app_role from auth.users where email = '<your-email>';
+   ```
+3. **Verify** with a `read_query` showing your account now has `expert` in `user_roles`, and confirm "Expert" link appears in the header on refresh.
 
-## 2. Server functions (`src/lib/expert-server.ts`)
+## What you'll do (manual two-window test)
 
-All use `requireSupabaseAuth` middleware + check `has_role(userId, 'expert'|'admin')` server-side via the authenticated supabase client (RLS enforces it, but we double-check and return 403 on failure).
+**Window A — anonymous user** (incognito / private window so no session):
+1. Go to `/consult` → complete the 5-step intake → "Begin consult"
+2. Send 3+ messages in the chat → click "Generate my recommendation"
+3. Land on `/consult/$id/result` showing the pulsing lotus "Awaiting human review" card. **Leave this tab open and visible.**
 
-- `listQueue({ filter: 'pending'|'escalated'|'mine'|'all' })` → joins `prescriptions` + `consults` + author profile, returns id, status, created_at, claimed_by, intake summary, red_flags count.
-- `getReviewDetail({ prescriptionId })` → returns `{ prescription, consult, messages[], audit[] }`.
-- `claimPrescription({ prescriptionId })` → sets `claimed_by=userId, claimed_at=now()` only if currently unclaimed (conditional update); writes `claim` row to `prescription_audit`.
-- `releasePrescription({ prescriptionId })` → clears claim if owned by caller.
-- `approvePrescription({ prescriptionId, final, notes? })` → status=`approved`, `final` jsonb, `reviewed_by/at`, also flips parent `consults.status='approved'`. Writes `approve` audit row with diff (draft → final).
-- `rejectPrescription({ prescriptionId, notes })` → status=`rejected` + consult `rejected`. Audit `reject`.
-- `escalatePrescription({ prescriptionId, notes })` → status=`escalated` + consult `escalated`. Audit `escalate`.
+**Window B — expert** (your normal logged-in window):
+1. Go to `/expert` → see the new pending item appear in the queue (realtime)
+2. Open it → click **Claim for review** → edit nothing or tweak a field → **Approve**
+3. **Switch back to Window A** without refreshing.
 
-Each mutation re-checks the caller still owns the claim (or that nobody owns it, for approve from unclaimed state we'll require claim first in UI).
+## Pass criteria
 
-## 3. Routes
+- ✅ Window A transitions from "Awaiting review" → green "Approved by a practitioner" view automatically (realtime channel on `prescriptions` filtered by `consult_id`).
+- ✅ Audit trail panel on the expert detail page shows two rows: `Claimed for review` then `Approved`, both attributed to your account.
+- ✅ `prescription_audit` table contains both rows (I'll verify with a SQL read after you confirm).
 
-**`/expert`** (replace placeholder at `src/routes/_authenticated/_expert/expert.tsx`)
-- Tabs: Pending · Escalated · Mine · All (drives `filter` search param via `validateSearch`).
-- Card list, mobile-friendly: status badge, age ("3h ago"), top symptoms, red-flag chip if any, claimed-by avatar/initials.
-- Empty state: "Queue is clear."
-- Realtime subscription on `prescriptions` (insert/update) → `router.invalidate()` so the list refreshes when another expert claims/approves.
+## If it doesn't auto-update
 
-**`/expert/$prescriptionId`** (new file `src/routes/_authenticated/_expert/expert.$prescriptionId.tsx`)
-- Three-section layout (stacked on mobile, two-column ≥md):
-  1. **Intake summary** — pretty-rendered from `consults.intake` jsonb, plus consult age and author email/display name.
-  2. **Conversation** — full `consult_messages` list using existing `ChatMessage` component, scrollable, read-only.
-  3. **Draft recommendation editor** — form initialized from `prescription.draft`. Each recommendation card is editable: title, modality (select), rationale (textarea), products (add/remove rows: name/form/dosage/notes), safety_notes, citations (one per line). Plus top-level `summary`, `red_flags` chips, `escalate` toggle.
-- Action bar (sticky bottom on mobile):
-  - If unclaimed → **Claim for review** (primary). Other actions disabled.
-  - If claimed by current user → **Approve**, **Reject** (requires notes), **Escalate** (requires notes), **Release**.
-  - If claimed by someone else → read-only banner "Claimed by {name} — only they can act."
-- Audit trail panel (collapsible at bottom): list of `prescription_audit` rows with actor, action, timestamp.
+Likely cause: realtime publication doesn't include `prescriptions`. The Phase 4 migration enabled it, but I'll re-check `pg_publication_tables` and re-add if missing. No code change expected.
 
-## 4. Header & UX touches
+## Reply with
 
-- Header already shows "Expert" link for experts/admins (Phase 2). Add a small queue-count badge — fetched via lightweight server fn `getQueueCount()` cached 30s.
-- Toasts via `sonner` for every action result (success / failure / "another expert just claimed this").
-
-## 5. Account page additions
-
-- The user-side `account.tsx` already lists consults; once approval flips `consults.status='approved'` the existing UI just works. No changes needed beyond confirming the status badge styles cover all five statuses.
-
-## 6. Realtime updates on result page
-
-- Add a `supabase.channel` subscription on `prescriptions` filtered by `consult_id` to `src/routes/consult.$consultId.result.tsx` so users awaiting review auto-transition to the approved view without refresh.
-
-## 7. Files
-
-**New**
-- `src/routes/_authenticated/_expert/expert.$prescriptionId.tsx`
-- `src/lib/expert-server.ts` (all server fns above)
-- `src/components/expert/queue-card.tsx`
-- `src/components/expert/recommendation-editor.tsx`
-- `src/components/expert/audit-trail.tsx`
-- One migration: add `claimed_by`, `claimed_at` columns to `prescriptions`
-
-**Edit**
-- `src/routes/_authenticated/_expert/expert.tsx` (replace placeholder with real queue + tabs + realtime)
-- `src/components/site-header.tsx` (queue-count badge for experts)
-- `src/routes/consult.$consultId.result.tsx` (realtime auto-refresh on approval)
-
-## 8. Out of scope (Phase 5)
-Email/SMS notifications when prescription approved, senior-expert escalation routing, expert performance analytics, marketplace (Pillar 3), education packages (Pillar 4).
+Just your signup email. I'll handle the role grant and verification, then you run the two-window test.
 
