@@ -189,7 +189,7 @@ function ExpertDashboard() {
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
                 {filter === "drafts"
-                  ? "Anonymous patients mid-consult will appear here."
+                  ? "Patients mid-consult appear here with their contact details."
                   : "Take a moment. We'll let you know when something needs you."}
               </p>
             </div>
