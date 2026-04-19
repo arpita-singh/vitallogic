@@ -181,6 +181,15 @@ function ConsultChatPage() {
   return (
     <Section className="!py-6 md:!py-10">
       <div className="mx-auto flex h-[calc(100vh-12rem)] max-w-2xl flex-col">
+        {/* Status banner */}
+        <div className="mb-3 rounded-2xl border border-gold/40 bg-gold/5 px-4 py-3 text-xs text-foreground">
+          <span className="text-gold">Consult started.</span>{" "}
+          <span className="text-muted-foreground">
+            Chat with your AI guide for a few exchanges, then tap{" "}
+            <span className="text-foreground">Generate my recommendation</span> to send it for
+            human review.
+          </span>
+        </div>
         {/* Intake summary */}
         {intakeSummary && (
           <div className="mb-3 rounded-2xl border border-border bg-surface">

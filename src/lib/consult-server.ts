@@ -38,6 +38,8 @@ export type Intake = {
   pregnancy?: "yes" | "no" | "na";
   under18?: boolean;
   goals: string[];
+  contactEmail?: string;
+  contactName?: string;
 };
 
 function intakeSummary(intake: Intake): string {
@@ -113,6 +115,43 @@ export const startConsult = createServerFn({ method: "POST" })
     }
 
     return { consultId: consult.id as string };
+  });
+
+/**
+ * Save patient contact info onto an existing consult's intake JSON.
+ * Used for anonymous consults so the practitioner can reach them when
+ * the prescription is approved. Works without auth — RLS lets anyone
+ * update rows where user_id is still null.
+ */
+export const saveConsultContact = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: { consultId: string; contactEmail: string; contactName?: string }) => data,
+  )
+  .handler(async ({ data }) => {
+    const supabase = getSupabaseForRequest();
+    const { data: row, error: fetchErr } = await supabase
+      .from("consults")
+      .select("intake")
+      .eq("id", data.consultId)
+      .maybeSingle();
+    if (fetchErr || !row) {
+      console.error("saveConsultContact fetch failed", fetchErr);
+      throw new Error("Could not save contact info");
+    }
+    const nextIntake = {
+      ...((row.intake as Record<string, unknown>) ?? {}),
+      contactEmail: data.contactEmail,
+      contactName: data.contactName ?? null,
+    };
+    const { error } = await supabase
+      .from("consults")
+      .update({ intake: nextIntake as never })
+      .eq("id", data.consultId);
+    if (error) {
+      console.error("saveConsultContact update failed", error);
+      throw new Error("Could not save contact info");
+    }
+    return { ok: true };
   });
 
 /**
