@@ -38,6 +38,8 @@ export type Intake = {
   pregnancy?: "yes" | "no" | "na";
   under18?: boolean;
   goals: string[];
+  contactEmail?: string;
+  contactName?: string;
 };
 
 function intakeSummary(intake: Intake): string {
