@@ -1,55 +1,54 @@
 
 
-## What's actually happening
+## Diagnosis
 
-The contact-capture form **does** exist and **is** wired up — but it only appears on the **result page** *after* a prescription has been generated. Looking at the database, none of your test consults have a prescription yet (all are `status: draft`). So the form never had a chance to render, and no contact details exist for the expert queue to display.
+You haven't been seeing a contact form during intake because today the form lives only on the **chat page** and **result page** — both come *after* the 5-step intake stepper. So the moment you tap "Begin consult", you skip past any contact prompt and head straight into the AI chat. If you're signed in (even as the expert), the chat-page form is also hidden by `!user`, which is why every test consult in the database has `contactEmail = null`.
 
-The `ContactCapture` component renders inside `consult.$consultId.result.tsx`, gated by:
-1. `!user` (anonymous only), AND
-2. `rx.status === 'pending_review' || 'escalated'` (a prescription must exist)
+You answered: **show the form as a final intake step + keep a fallback at later points**. Here is what we'll change.
 
-So you've never seen it because the test flow stops at the chat screen — you'd need to send 3+ replies and click **Generate my recommendation** to reach the page where the form lives.
+## Plan
 
-This is a UX problem, not a "Phase 5 feature." The fix is simple: **also collect contact details on the chat page**, so anonymous patients can leave their email at any point — not only after generation.
+### 1. Add a 6th step to the intake stepper — "How to reach you"
 
-## The plan
-
-### 1. Add `ContactCapture` to the chat page (anonymous users only)
-
-In `src/routes/consult.$consultId.tsx`, render a compact contact-capture banner for anonymous users right under the status banner. This way the patient sees it the moment they enter the chat — well before they generate a recommendation.
+In `src/components/consult/intake-stepper.tsx`:
+- Bump `total` from 5 to 6 and add a `"Contact"` label.
+- Add `contactName` + `contactEmail` to the local `intake` state.
+- New step body: name (optional) + email (required, validated with a simple regex).
+- `canNext` for step 5 requires a valid email.
+- The final "Begin consult" button moves to step 6.
 
 ```text
-┌────────────────────────────────────────┐
-│ Consult started.  Chat for a few...    │  ← existing
-├────────────────────────────────────────┤
-│ ✉  How should we reach you?            │  ← NEW (anon only)
-│    [name] [email]  [Save]              │
-├────────────────────────────────────────┤
-│ Intake summary  ▾                      │  ← existing
-└────────────────────────────────────────┘
+Steps: Symptoms → Timing → Lifestyle → Safety → Goals → Contact
+                                                         ▲ NEW
+                                                  [name] [email]  Begin consult
 ```
 
-After saving, it collapses to a small "We'll email you at x@y.com ✓" pill so it doesn't take up space.
+For signed-in users we **prefill** `contactEmail` from `user.email` and `contactName` from the profile display name, but still show the step so they can confirm or edit (you said "use account email" earlier; this respects that while leaving an explicit confirm). If you'd rather skip the step entirely when signed in, we can hide it behind `!user`.
 
-### 2. Detect anonymous state correctly
+### 2. Persist contact details with the consult on creation
 
-Use the existing `useAuth()` hook (already imported in the result page) to check `!user`. Skip the form entirely for signed-in users — their email is already on their profile.
+`src/lib/consult-server.ts → startConsult` already stores the entire `intake` JSON. Because the new `contactEmail`/`contactName` live inside `Intake`, **no server change is required** — the values flow into `consults.intake` automatically. The expert queue (`queue-card.tsx`) and detail view (`expert.$prescriptionId.tsx`) already read these exact keys, so they will appear immediately.
 
-### 3. Hide the duplicate on the result page when already captured
+### 3. Keep the chat-page banner as a fallback
 
-On the result page, only render `<ContactCapture>` if the consult's intake doesn't already have `contactEmail`. Fetch that alongside the prescription so we don't ask twice.
+`src/routes/consult.$consultId.tsx` already conditionally shows `<ContactCapture>` when `intake.contactEmail` is missing. With step 1 in place this banner will normally stay hidden, but it remains a safety net for any consult that somehow lands without an email (e.g. older rows, future skip-paths).
 
-### 4. Show "Pending contact" hint to experts
+### 4. Tiny polish
 
-Tiny polish: in `queue-card.tsx`, when an anonymous consult has no `contactEmail` yet, show a subtle "No contact yet" label instead of an empty contact block, so experts know the patient can't be reached.
+- Update the consult page's submitting copy/toast to mention "We'll email you when your recommendation is ready."
+- In `expert.tsx` Drafts tab empty state, reword to make clear drafts now arrive *with* contact info.
 
 ## Files to change
 
-- `src/routes/consult.$consultId.tsx` — render `ContactCapture` for anonymous users; fetch consult intake to check if email already exists.
-- `src/routes/consult.$consultId.result.tsx` — only show `ContactCapture` if no `contactEmail` saved yet.
-- `src/components/expert/queue-card.tsx` — show "No contact yet" label when anonymous and no email.
+- `src/components/consult/intake-stepper.tsx` — add Contact step, prefill from auth, validate email, bump total to 6.
+- `src/routes/consult.tsx` — pass `user.email`/profile name as initial contact values to the stepper; minor copy.
+- `src/lib/consult-server.ts` — no logic change; only confirm types already include `contactEmail`/`contactName` (they do).
+- `src/routes/_authenticated/_expert/expert.tsx` — small copy tweak in Drafts empty state.
 
-## Why no Phase 5 needed
+No DB migration, no RLS changes, no new server function — the schema and policies already support this.
 
-You asked whether Phase 5+ is required — no. Contact capture is fully implemented backend-wise (server function `saveConsultContact`, RLS policy for anonymous updates, expert queue mapping). The only gap is the form was placed too late in the funnel. Moving it forward to the chat page closes the loop.
+## Why this fixes what you saw
+
+Right now: intake → chat → (form hidden because you were signed in) → no email saved → expert queue shows "NO CONTACT YET".
+After: intake → **Contact step (required)** → chat → expert queue shows the patient's name and email on every card.
 
