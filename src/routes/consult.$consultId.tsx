@@ -4,7 +4,9 @@ import { toast } from "sonner";
 import { ChevronDown, ChevronUp, Send, Sparkles } from "lucide-react";
 import { Section } from "@/components/section";
 import { ChatMessage } from "@/components/consult/chat-message";
+import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/consult/$consultId")({
   head: () => ({
@@ -20,6 +22,7 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/consult-chat
 function ConsultChatPage() {
   const { consultId } = Route.useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [intakeSummary, setIntakeSummary] = useState<string>("");
   const [intakeOpen, setIntakeOpen] = useState(false);
@@ -27,26 +30,32 @@ function ConsultChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [hasContact, setHasContact] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Initial load
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("consult_messages")
-        .select("role, content")
-        .eq("consult_id", consultId)
-        .order("created_at", { ascending: true });
+      const [msgRes, consultRes] = await Promise.all([
+        supabase
+          .from("consult_messages")
+          .select("role, content")
+          .eq("consult_id", consultId)
+          .order("created_at", { ascending: true }),
+        supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+      ]);
       if (cancelled) return;
-      if (error) {
+      if (msgRes.error) {
         toast.error("Could not load your consult.");
         return;
       }
-      const all = (data ?? []) as Msg[];
+      const all = (msgRes.data ?? []) as Msg[];
       const sys = all.find((m) => m.role === "system");
       if (sys) setIntakeSummary(sys.content);
       setMessages(all.filter((m) => m.role !== "system"));
+      const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
+      setHasContact(Boolean(intake.contactEmail));
       setLoaded(true);
     })();
     return () => {
@@ -190,6 +199,12 @@ function ConsultChatPage() {
             human review.
           </span>
         </div>
+        {/* Contact capture (anonymous users only, before they've saved) */}
+        {loaded && !user && !hasContact && (
+          <div className="mb-3">
+            <ContactCapture consultId={consultId} />
+          </div>
+        )}
         {/* Intake summary */}
         {intakeSummary && (
           <div className="mb-3 rounded-2xl border border-border bg-surface">
