@@ -110,6 +110,8 @@ export type Database = {
       }
       prescriptions: {
         Row: {
+          claimed_at: string | null
+          claimed_by: string | null
           consult_id: string
           created_at: string
           draft: Json
@@ -122,6 +124,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          claimed_at?: string | null
+          claimed_by?: string | null
           consult_id: string
           created_at?: string
           draft: Json
@@ -134,6 +138,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          claimed_at?: string | null
+          claimed_by?: string | null
           consult_id?: string
           created_at?: string
           draft?: Json
