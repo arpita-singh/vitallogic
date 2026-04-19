@@ -1,4 +1,4 @@
-import { claimConsult } from "@/lib/consult-server";
+import { claimConsultRequest } from "@/lib/consult-access";
 
 const SESSION_KEY = "pendingConsultV2";
 const LEGACY_SESSION_ID_KEY = "pendingConsultId";
@@ -105,9 +105,7 @@ export async function claimPendingConsult(_userId: string): Promise<string | nul
   const pending = getPendingConsult();
   if (!pending) return null;
   try {
-    await claimConsult({
-      data: { consultId: pending.consultId, anonToken: pending.anonToken || undefined },
-    });
+    await claimConsultRequest(pending.consultId, pending.anonToken || undefined);
   } catch (e) {
     console.error("claimPendingConsult error", e);
   } finally {
@@ -126,7 +124,7 @@ export async function claimSpecificConsult(
 ): Promise<boolean> {
   const token = getAnonTokenFor(consultId);
   try {
-    const res = await claimConsult({ data: { consultId, anonToken: token } });
+    const res = await claimConsultRequest(consultId, token);
     if (getPendingConsultId() === consultId) clearPendingConsult();
     return !!res?.ok;
   } catch (e) {

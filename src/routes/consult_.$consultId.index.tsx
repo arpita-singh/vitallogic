@@ -7,7 +7,7 @@ import { ChatMessage } from "@/components/consult/chat-message";
 import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { getConsult } from "@/lib/consult-server";
+import { readConsult } from "@/lib/consult-access";
 import { getAnonTokenFor } from "@/lib/claim-consult";
 
 export const Route = createFileRoute("/consult_/$consultId/")({
@@ -44,9 +44,7 @@ function ConsultChatPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await getConsult({
-          data: { consultId, anonToken: getAnonTokenFor(consultId) },
-        });
+        const res = await readConsult(consultId, getAnonTokenFor(consultId));
         if (cancelled) return;
         const all = (res.messages ?? []) as Msg[];
         const sys = all.find((m) => m.role === "system");
