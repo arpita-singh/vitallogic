@@ -30,6 +30,29 @@ const corsHeaders = {
 const consultId = z.string().uuid();
 const anonToken = z.string().max(128).optional();
 
+const shortText = z.string().trim().max(500);
+const longText = z.string().trim().max(2000);
+
+const intakeSchema = z.object({
+  symptoms: z.array(z.string().max(100)).max(20).default([]),
+  symptomsNote: longText.optional(),
+  duration: z.enum(["acute", "subacute", "chronic"]).optional(),
+  severity: z.number().int().min(0).max(10).optional(),
+  sleepHours: z.number().min(0).max(24).optional(),
+  stress: z.number().int().min(0).max(5).optional(),
+  diet: shortText.optional(),
+  activity: z.number().int().min(0).max(5).optional(),
+  meds: longText.optional(),
+  allergies: longText.optional(),
+  pregnancy: z.enum(["yes", "no", "na"]).optional(),
+  under18: z.boolean().optional(),
+  goals: z.array(z.string().max(100)).max(20).default([]),
+  contactEmail: z.string().trim().toLowerCase().email().max(255).optional(),
+  contactName: shortText.optional(),
+});
+
+type Intake = z.infer<typeof intakeSchema>;
+
 const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("read"), consultId, anonToken }),
   z.object({
@@ -41,7 +64,32 @@ const Body = z.discriminatedUnion("action", [
   }),
   z.object({ action: z.literal("claim"), consultId, anonToken }),
   z.object({ action: z.literal("unlock"), consultId }),
+  z.object({ action: z.literal("start"), intake: intakeSchema }),
 ]);
+
+function intakeSummary(intake: Intake): string {
+  const parts: string[] = [];
+  if (intake.symptoms?.length) parts.push(`Symptoms: ${intake.symptoms.join(", ")}`);
+  if (intake.symptomsNote) parts.push(`Notes: ${intake.symptomsNote}`);
+  if (intake.duration) parts.push(`Duration: ${intake.duration}`);
+  if (intake.severity != null) parts.push(`Severity: ${intake.severity}/10`);
+  if (intake.sleepHours != null) parts.push(`Sleep: ${intake.sleepHours}h/night`);
+  if (intake.stress != null) parts.push(`Stress: ${intake.stress}/5`);
+  if (intake.diet) parts.push(`Diet: ${intake.diet}`);
+  if (intake.activity != null) parts.push(`Activity: ${intake.activity}/5`);
+  if (intake.meds) parts.push(`Current meds: ${intake.meds}`);
+  if (intake.allergies) parts.push(`Allergies: ${intake.allergies}`);
+  if (intake.pregnancy && intake.pregnancy !== "na") parts.push(`Pregnant: ${intake.pregnancy}`);
+  if (intake.under18) parts.push(`Under 18: yes`);
+  if (intake.goals?.length) parts.push(`Goals: ${intake.goals.join(", ")}`);
+  return `INTAKE SUMMARY\n${parts.join("\n")}`;
+}
+
+function base64url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
