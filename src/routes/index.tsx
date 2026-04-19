@@ -77,6 +77,15 @@ function Home() {
             </Link>
           </div>
 
+          {!isAuthenticated && (
+            <p className="mt-5 text-sm text-muted-foreground">
+              Already had a consult?{" "}
+              <Link to="/login" className="text-gold hover:underline">
+                Sign in to view your prescription
+              </Link>
+            </p>
+          )}
+
           <div className="relative mt-14 w-full max-w-xl">
             <div className="absolute inset-0 -z-10 rounded-full bg-violet/20 blur-3xl" />
             <img
