@@ -22,6 +22,7 @@ import { Route as ConsultRouteImport } from './routes/consult'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConsultConsultIdRouteImport } from './routes/consult_.$consultId'
+import { Route as AuthenticatedOwnerManualRouteImport } from './routes/_authenticated/owner-manual'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
 import { Route as ConsultConsultIdResultRouteImport } from './routes/consult_.$consultId.result'
@@ -92,6 +93,12 @@ const ConsultConsultIdRoute = ConsultConsultIdRouteImport.update({
   path: '/consult/$consultId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedOwnerManualRoute =
+  AuthenticatedOwnerManualRouteImport.update({
+    id: '/owner-manual',
+    path: '/owner-manual',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   id: '/account',
   path: '/account',
@@ -132,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -150,6 +158,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -171,6 +180,7 @@ export interface FileRoutesById {
   '/unauthorized': typeof UnauthorizedRoute
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
+  '/_authenticated/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
   '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/unauthorized'
     | '/account'
+    | '/owner-manual'
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/unauthorized'
     | '/account'
+    | '/owner-manual'
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
@@ -229,6 +241,7 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/_authenticated/_expert'
     | '/_authenticated/account'
+    | '/_authenticated/owner-manual'
     | '/consult_/$consultId'
     | '/_authenticated/_expert/expert'
     | '/consult_/$consultId/result'
@@ -344,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsultConsultIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/owner-manual': {
+      id: '/_authenticated/owner-manual'
+      path: '/owner-manual'
+      fullPath: '/owner-manual'
+      preLoaderRoute: typeof AuthenticatedOwnerManualRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/account': {
       id: '/_authenticated/account'
       path: '/account'
@@ -399,11 +419,13 @@ const AuthenticatedExpertRouteWithChildren =
 interface AuthenticatedRouteChildren {
   AuthenticatedExpertRoute: typeof AuthenticatedExpertRouteWithChildren
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
+  AuthenticatedOwnerManualRoute: typeof AuthenticatedOwnerManualRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedExpertRoute: AuthenticatedExpertRouteWithChildren,
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
+  AuthenticatedOwnerManualRoute: AuthenticatedOwnerManualRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

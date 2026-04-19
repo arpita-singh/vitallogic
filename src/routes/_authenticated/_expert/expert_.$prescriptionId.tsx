@@ -14,6 +14,7 @@ import { Section } from "@/components/section";
 import { ChatMessage } from "@/components/consult/chat-message";
 import { RecommendationEditor, type RxData } from "@/components/expert/recommendation-editor";
 import { AuditTrail, type AuditEntry } from "@/components/expert/audit-trail";
+import { ProductPicker, type AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import type { Intake } from "@/lib/consult-server";
@@ -36,6 +37,7 @@ type Prescription = {
   reviewed_by: string | null;
   reviewed_at: string | null;
   review_notes: string | null;
+  attached_products: AttachedProduct[];
 };
 
 type Consult = {
@@ -57,6 +59,7 @@ function ReviewPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [edit, setEdit] = useState<RxData | null>(null);
+  const [attachedProducts, setAttachedProducts] = useState<AttachedProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
@@ -65,7 +68,7 @@ function ReviewPage() {
     const { data: p, error: pErr } = await supabase
       .from("prescriptions")
       .select(
-        "id, consult_id, status, draft, final, claimed_by, claimed_at, reviewed_by, reviewed_at, review_notes",
+        "id, consult_id, status, draft, final, claimed_by, claimed_at, reviewed_by, reviewed_at, review_notes, attached_products",
       )
       .eq("id", prescriptionId)
       .maybeSingle();
@@ -77,6 +80,7 @@ function ReviewPage() {
     const presc = p as unknown as Prescription;
     setRx(presc);
     setEdit((presc.final ?? presc.draft) as RxData);
+    setAttachedProducts((presc.attached_products ?? []) as AttachedProduct[]);
     setNotes(presc.review_notes ?? "");
 
     const { data: c } = await supabase
@@ -178,6 +182,7 @@ function ReviewPage() {
       .update({
         status: "approved",
         final: edit as never,
+        attached_products: attachedProducts as never,
         reviewed_by: user.id,
         reviewed_at: new Date().toISOString(),
         review_notes: notes || null,
@@ -190,6 +195,17 @@ function ReviewPage() {
     }
     await supabase.from("consults").update({ status: "approved" }).eq("id", rx.consult_id);
     await writeAudit("approve", { draft: rx.draft, final: edit });
+
+    // Audit product attachment as a separate, additive entry.
+    const before = (rx.attached_products ?? []) as AttachedProduct[];
+    const beforeIds = new Set(before.map((p) => p.product_id));
+    const afterIds = new Set(attachedProducts.map((p) => p.product_id));
+    const added = attachedProducts.filter((p) => !beforeIds.has(p.product_id));
+    const removed = before.filter((p) => !afterIds.has(p.product_id));
+    if (added.length > 0 || removed.length > 0) {
+      await writeAudit("attach_products", { added, removed });
+    }
+
     toast.success("Approved and sent.");
     navigate({ to: "/expert", search: { filter: "pending" } });
   };
@@ -385,6 +401,23 @@ function ReviewPage() {
               </p>
               <div className="mt-5">
                 <RecommendationEditor value={edit} onChange={setEdit} disabled={!canEdit} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-surface p-5">
+              <h2 className="font-display text-xl text-foreground">
+                Attach marketplace products
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pulled from the certified materia medica catalogue. Patients see these on their
+                approved recommendation.
+              </p>
+              <div className="mt-5">
+                <ProductPicker
+                  value={attachedProducts}
+                  onChange={setAttachedProducts}
+                  disabled={!canEdit}
+                />
               </div>
             </div>
 
