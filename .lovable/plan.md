@@ -1,51 +1,38 @@
 
 
-## Fix — `has_role_ignores_user_id_parameter`
-
-### Background
-In an earlier pass we hardened `has_role` against role enumeration by making the body always check `auth.uid()` and ignoring the `_user_id` argument. The scanner now (correctly) flags the opposite risk: the function lies about what it does. If a future RLS policy ever passes a non-caller uuid (e.g. to check whether a target resource's owner has a role), it will silently return the caller's role instead — a subtle, dangerous correctness bug.
-
-### Fix
-Make `has_role` honour its parameter again, but close the enumeration vector at the permission layer instead of inside the function body.
+The scanner is flagging `has_role` again, but per the schema dump in context the function body **already** uses `_user_id` correctly:
 
 ```sql
-create or replace function public.has_role(_user_id uuid, _role public.app_role)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1
-    from public.user_roles
-    where user_id = _user_id
-      and role    = _role
-  )
-$$;
-
--- Lock down direct RPC access; RLS policies still call it fine because
--- SECURITY DEFINER runs as the function owner.
-revoke all on function public.has_role(uuid, public.app_role) from public, anon, authenticated;
+select exists (
+  select 1 from public.user_roles
+  where user_id = _user_id
+    and role    = _role
+)
 ```
 
-Why this is safe:
-- All existing RLS policies pass `auth.uid()` (verified across the schema dump) → behaviour unchanged for legitimate access checks.
-- `SECURITY DEFINER` means RLS evaluation continues to execute the function regardless of `EXECUTE` grants to the calling role — Postgres only checks `EXECUTE` for direct invocations (RPC / ad-hoc SQL), not for references inside policies executed by the planner.
-- Revoking `EXECUTE` from `authenticated`/`anon`/`public` removes the PostgREST RPC enumeration surface entirely. A signed-in user calling `supabase.rpc('has_role', { _user_id: '<other>', _role: 'admin' })` now gets `permission denied for function has_role`.
+So the underlying bug is fixed — this is a stale finding from the scanner's previous snapshot. The previous pass also revoked direct RPC `EXECUTE` from `public/anon/authenticated`, closing the enumeration path while letting RLS policies (SECURITY DEFINER) keep working.
 
-### Files to change
-- New migration: `supabase/migrations/<ts>_restore_has_role_param.sql`
+## What to do
 
-### Verification
-- App-side role checks (route guards, expert dashboard, RLS on every table) keep working — they all run through policies, not direct RPC.
-- Direct RPC enumeration is rejected with `permission denied`.
-- Scanner finding `has_role_ignores_user_id_parameter` clears.
+**1. Mark the finding as fixed** in the scanner with an explanation pointing at the current function definition + the revoked grants. No code or DB changes needed for the security finding itself.
 
-### Side fix (runtime error in preview)
-The current preview shows `Missing Supabase server environment variables` from `src/integrations/supabase/client.server.ts`. I'll add `import.meta.env` fallbacks (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) before throwing so SSR stops crashing in the Worker when `process.env` is empty. Small, contained; same pass.
+**2. Side-fix the runtime error blocking the preview**
 
-### Out of scope (separate findings)
-- `consult_messages` anonymous read/write hardening
-- `user_purchases` owner UPDATE scope tightening
+`src/integrations/supabase/client.server.ts` is throwing `Missing Supabase server environment variables. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.` This breaks SSR pages right now. The Worker's `process.env` shim is empty in some code paths; add an `import.meta.env` fallback before throwing so server functions can read the values that are present at build time as well.
+
+I'll inspect `client.server.ts` in the implementation pass and add the fallback chain:
+```ts
+const SUPABASE_URL = process.env.SUPABASE_URL ?? import.meta.env.SUPABASE_URL ?? import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+```
+Only the URL gets the `VITE_` fallback (it's public). The service-role key never falls back to a `VITE_` value — that would leak it to the client bundle.
+
+## Files touched
+- `src/integrations/supabase/client.server.ts` — env fallback chain
+- Scanner: `mark_as_fixed` for `has_role_ignores_user_id_parameter`
+
+## Out of scope (separate findings)
+- `consults_anon_token_no_select_policy` (warn) — anonymous read of own consult/messages via token; tackle next pass.
+- `consult_messages` anonymous insert hardening.
+- `user_purchases` owner UPDATE column scope.
 
