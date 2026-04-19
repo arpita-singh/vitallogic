@@ -116,8 +116,9 @@ function ResultPage() {
     void load();
 
     // Realtime: refresh when this consult's prescription updates (e.g. expert approves).
+    // Private channel so realtime.messages RLS gates who can subscribe to this topic.
     const channel = supabase
-      .channel(`rx-${consultId}`)
+      .channel(`rx-${consultId}`, { config: { private: true } })
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "prescriptions", filter: `consult_id=eq.${consultId}` },

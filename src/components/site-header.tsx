@@ -59,8 +59,9 @@ export function SiteHeader() {
       if (!cancelled) setQueueCount(count ?? 0);
     };
     void load();
+    // Private channel: only experts/admins are allowed to subscribe (RLS on realtime.messages).
     const channel = supabase
-      .channel("header-queue-count")
+      .channel("header-queue-count", { config: { private: true } })
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "prescriptions" },
@@ -98,8 +99,10 @@ export function SiteHeader() {
       setSingleReadyConsultId(c === 1 ? uniqueConsultIds[0] : null);
     };
     void load();
+    // Private channel scoped to this user — RLS on realtime.messages requires
+    // the topic to be `ready-<auth.uid()>`.
     const channel = supabase
-      .channel("header-ready-count")
+      .channel(`ready-${user.id}`, { config: { private: true } })
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "prescriptions" },
