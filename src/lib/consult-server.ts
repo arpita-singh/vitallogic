@@ -99,8 +99,9 @@ export const startConsult = createServerFn({ method: "POST" })
     const authHeader = request?.headers?.get("authorization");
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.slice("Bearer ".length);
-      const { data: authData } = await supabase.auth.getClaims(token);
-      const verifiedUserId = authData?.claims?.sub;
+      const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+      if (userErr) console.error("auto-claim getUser failed", userErr);
+      const verifiedUserId = userData?.user?.id;
       if (verifiedUserId) {
         const { error: claimErr } = await supabase
           .from("consults")
