@@ -6,6 +6,7 @@ import { IntakeStepper } from "@/components/consult/intake-stepper";
 import { startConsult, type Intake } from "@/lib/consult-server";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { rememberPendingConsult } from "@/lib/claim-consult";
 
 export const Route = createFileRoute("/consult")({
   head: () => ({
@@ -58,13 +59,9 @@ function ConsultPage() {
       const { consultId } = await startConsult({
         data: { intake, userId: user?.id ?? null },
       });
-      // Stash for anonymous → account claim later
+      // Stash for anonymous → account claim later (unified helper).
       if (!user) {
-        try {
-          localStorage.setItem("vl_consult_id", consultId);
-        } catch {
-          // ignore
-        }
+        rememberPendingConsult(consultId);
       }
       toast.success("Intake submitted — we'll email you when your recommendation is ready.");
       navigate({ to: "/consult/$consultId", params: { consultId } });

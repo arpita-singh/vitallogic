@@ -45,12 +45,15 @@ export interface AuthState {
   loading: boolean;
   hasRole: (role: AppRole) => boolean;
   hasAnyRole: (roles: AppRole[]) => boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signIn: (
+    email: string,
+    password: string,
+  ) => Promise<{ error: Error | null; claimedConsultId?: string | null }>;
   signUp: (
     email: string,
     password: string,
     displayName: string,
-  ) => Promise<{ error: Error | null }>;
+  ) => Promise<{ error: Error | null; claimedConsultId?: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -131,10 +134,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasAnyRole: (rs) => rs.some((r) => roles.includes(r)),
       signIn: async (email, password) => {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        let claimedConsultId: string | null = null;
         if (!error && data.user) {
-          await claimPendingConsult(data.user.id);
+          claimedConsultId = await claimPendingConsult(data.user.id);
         }
-        return { error };
+        return { error, claimedConsultId };
       },
       signUp: async (email, password, displayName) => {
         const redirectUrl = `${window.location.origin}/auth/callback`;
@@ -146,10 +150,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             data: { display_name: displayName },
           },
         });
+        let claimedConsultId: string | null = null;
         if (!error && data.user) {
-          await claimPendingConsult(data.user.id);
+          claimedConsultId = await claimPendingConsult(data.user.id);
         }
-        return { error };
+        return { error, claimedConsultId };
       },
       signOut: async () => {
         await supabase.auth.signOut();

@@ -9,7 +9,7 @@ import { ProductCard } from "@/components/consult/product-card";
 import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { rememberPendingConsult } from "@/lib/claim-consult";
+import { rememberPendingConsult, claimSpecificConsult, getPendingConsult } from "@/lib/claim-consult";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
@@ -135,10 +135,26 @@ function ResultPage() {
   }
 
   // Gate: anonymous consult OR signed-in user who doesn't own this consult
-  // → show sign-in / sign-up prompt instead of the prescription.
+  // → attempt self-healing claim first; otherwise show the auth gate.
   const isOwner = user && consultOwnerId && user.id === consultOwnerId;
   const needsAuth = !isOwner;
   if (needsAuth) {
+    // Self-healing: signed-in user landing on an unclaimed consult that matches
+    // a remembered pending id → claim it now and re-load.
+    if (user && consultOwnerId === null) {
+      const pending = getPendingConsult();
+      if (pending === consultId) {
+        // Fire-and-forget; on success we update local state to flip the gate immediately.
+        void claimSpecificConsult(user.id, consultId).then((ok) => {
+          if (ok) setConsultOwnerId(user.id);
+        });
+        return (
+          <Section>
+            <p className="text-center text-muted-foreground">Linking your consult to your account…</p>
+          </Section>
+        );
+      }
+    }
     rememberPendingConsult(consultId);
     const redirectPath = `/consult/${consultId}/result`;
     return (

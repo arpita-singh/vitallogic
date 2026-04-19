@@ -38,14 +38,19 @@ function LoginPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { error: err } = await signIn(email, password);
+    const { error: err, claimedConsultId } = await signIn(email, password);
     if (err) {
       setSubmitting(false);
       setError(err.message);
       return;
     }
-    let target = search.redirect;
-    if (!target) {
+    // Priority: claimed consult > explicit ?redirect= > role-based default
+    let target: string | undefined;
+    if (claimedConsultId) {
+      target = `/consult/${claimedConsultId}/result`;
+    } else if (search.redirect) {
+      target = search.redirect;
+    } else {
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = sessionData.session?.user?.id;
       let roles: AppRole[] = [];

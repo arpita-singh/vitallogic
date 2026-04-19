@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
-import { claimConsult } from "@/lib/consult-server";
+import { claimPendingConsult, getPendingConsult } from "@/lib/claim-consult";
 
 type AccountSearch = { ready?: number };
 
@@ -53,31 +53,28 @@ function AccountPage() {
   const [displayName, setDisplayName] = useState<string>("");
   const [consults, setConsults] = useState<ConsultRow[]>([]);
   const [highlightReady, setHighlightReady] = useState(false);
+  const [pendingOrphan, setPendingOrphan] = useState<string | null>(null);
   const readyBannerRef = useRef<HTMLDivElement | null>(null);
 
-  // Claim any anonymous consult stashed in localStorage
+  // On mount: try to claim any remembered pending consult, then load.
   useEffect(() => {
     if (!user) return;
-    let stored: string | null = null;
-    try {
-      stored = localStorage.getItem("vl_consult_id");
-    } catch {
-      // ignore
-    }
-    if (stored) {
-      claimConsult({ data: { consultId: stored } })
-        .then(() => {
-          try {
-            localStorage.removeItem("vl_consult_id");
-          } catch {
-            // ignore
-          }
-        })
-        .catch((e) => console.error("claim failed", e))
-        .finally(() => loadConsults());
-    } else {
-      loadConsults();
-    }
+    let cancelled = false;
+    const run = async () => {
+      const claimed = await claimPendingConsult(user.id);
+      if (cancelled) return;
+      await loadConsults();
+      // If after claiming there's still a pending pointer (e.g. claim failed
+      // because a different account owns it), surface a fallback notice.
+      if (!claimed) {
+        const stillPending = getPendingConsult();
+        if (stillPending) setPendingOrphan(stillPending);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -205,6 +202,25 @@ function AccountPage() {
             </div>
           );
         })()}
+
+        {/* Pending-but-unattached fallback notice */}
+        {pendingOrphan && (
+          <div className="mt-6 rounded-2xl border border-violet/40 bg-violet/5 p-5">
+            <p className="text-sm text-foreground">
+              We found a recent consult that isn't linked to this account yet.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open it directly to attach it to your account, or sign in with the email you used originally.
+            </p>
+            <Link
+              to="/consult/$consultId/result"
+              params={{ consultId: pendingOrphan }}
+              className="mt-3 inline-flex rounded-full border border-violet/60 px-4 py-2 text-xs uppercase tracking-wider text-violet hover:bg-violet/10"
+            >
+              Open consult
+            </Link>
+          </div>
+        )}
 
         {/* Consults */}
         <div className="mt-10">

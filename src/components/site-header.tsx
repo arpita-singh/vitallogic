@@ -81,16 +81,21 @@ export function SiteHeader() {
     }
     let cancelled = false;
     const load = async () => {
-      // RLS limits this to the patient's own approved prescriptions
-      const { data, count } = await supabase
-        .from("prescriptions")
-        .select("id, consult_id, reviewed_at", { count: "exact" })
-        .eq("status", "approved")
-        .order("reviewed_at", { ascending: false });
+      // Patient-side ready count: derive from CONSULTS the user owns that have
+      // at least one approved prescription. This avoids false counts for
+      // dual-role users (experts) who can read prescriptions globally.
+      const { data } = await supabase
+        .from("consults")
+        .select("id, prescriptions!inner(id, status)")
+        .eq("user_id", user.id)
+        .eq("prescriptions.status", "approved")
+        .order("created_at", { ascending: false });
       if (cancelled) return;
-      const c = count ?? 0;
+      // Dedupe by consult id (defensive — !inner can repeat rows).
+      const uniqueConsultIds = Array.from(new Set((data ?? []).map((r) => r.id)));
+      const c = uniqueConsultIds.length;
       setReadyCount(c);
-      setSingleReadyConsultId(c === 1 && data && data[0] ? data[0].consult_id : null);
+      setSingleReadyConsultId(c === 1 ? uniqueConsultIds[0] : null);
     };
     void load();
     const channel = supabase
@@ -198,22 +203,28 @@ export function SiteHeader() {
                 </Link>
               )}
               {showAccountLink && (
-                <Link
-                  {...accountHref}
-                  className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
-                  aria-label={
-                    readyCount > 0
-                      ? `Account — ${readyCount} prescription${readyCount === 1 ? "" : "s"} ready`
-                      : "Account"
-                  }
-                >
-                  Account
+                <>
                   {readyCount > 0 && (
-                    <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
-                      {readyCount}
-                    </span>
+                    <Link
+                      {...accountHref}
+                      className="hidden items-center gap-1.5 rounded-full bg-gold px-3 py-2 text-xs font-semibold uppercase tracking-wider text-background shadow-[0_0_24px_rgba(212,175,55,0.45)] transition-opacity hover:opacity-90 sm:inline-flex"
+                      aria-label={`View ${readyCount} ready prescription${readyCount === 1 ? "" : "s"}`}
+                    >
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-background/60" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-background" />
+                      </span>
+                      {readyCount === 1 ? "Prescription ready" : `${readyCount} ready`}
+                    </Link>
                   )}
-                </Link>
+                  <Link
+                    to="/account"
+                    className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
+                    aria-label="Account"
+                  >
+                    Account
+                  </Link>
+                </>
               )}
             </>
           ) : (
