@@ -40,14 +40,17 @@ function SignupPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { error: err } = await signUp(email, password, displayName);
+    const { error: err, claimedConsultId } = await signUp(email, password, displayName);
     setSubmitting(false);
     if (err) {
       setError(err.message);
       return;
     }
     setSubmitted(true);
-    setTimeout(() => navigate({ to: search.redirect ?? "/account" }), 800);
+    const target = claimedConsultId
+      ? `/consult/${claimedConsultId}/result`
+      : (search.redirect ?? "/account");
+    setTimeout(() => navigate({ to: target }), 800);
   };
 
   return (
