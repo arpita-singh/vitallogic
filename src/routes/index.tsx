@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Brain, Database, ShieldCheck, GraduationCap, Sparkles } from "lucide-react";
 import heroLotus from "@/assets/hero-lotus.jpg";
 import { Section, SectionHeader } from "@/components/section";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/")({
   head: () => ({
