@@ -3,6 +3,13 @@ import { getRequest } from "@tanstack/react-start/server";
 import { createHash, randomBytes } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  startConsultInput,
+  getConsultInput,
+  saveConsultContactInput,
+  claimConsultInput,
+  unlockEducationInput,
+} from "@/lib/consult-schema";
 
 /**
  * Hash an anon token with SHA-256. We only ever store the hash on the row;
@@ -108,9 +115,9 @@ function intakeSummary(intake: Intake): string {
  * verified user id immediately and skip the token entirely.
  */
 export const startConsult = createServerFn({ method: "POST" })
-  .inputValidator((data: { intake: Intake; userId?: string | null }) => data)
+  .inputValidator((data: unknown) => startConsultInput.parse(data))
   .handler(async ({ data }) => {
-    const { intake } = data;
+    const intake = data.intake as Intake;
     const consultId = crypto.randomUUID();
     const verifiedUserId = await getVerifiedUserId();
 
@@ -152,7 +159,7 @@ export const startConsult = createServerFn({ method: "POST" })
  * permitted by RLS for anonymous consults.
  */
 export const getConsult = createServerFn({ method: "POST" })
-  .inputValidator((data: { consultId: string; anonToken?: string }) => data)
+  .inputValidator((data: unknown) => getConsultInput.parse(data))
   .handler(async ({ data }) => {
     const { ownerUserId } = await authorizeConsultAccess(data.consultId, data.anonToken);
 
@@ -186,14 +193,7 @@ export const getConsult = createServerFn({ method: "POST" })
  * Requires either signed-in ownership or matching anon token.
  */
 export const saveConsultContact = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: {
-      consultId: string;
-      contactEmail: string;
-      contactName?: string;
-      anonToken?: string;
-    }) => data,
-  )
+  .inputValidator((data: unknown) => saveConsultContactInput.parse(data))
   .handler(async ({ data }) => {
     await authorizeConsultAccess(data.consultId, data.anonToken);
 
@@ -231,7 +231,7 @@ export const saveConsultContact = createServerFn({ method: "POST" })
  */
 export const claimConsult = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { consultId: string; anonToken?: string }) => data)
+  .inputValidator((data: unknown) => claimConsultInput.parse(data))
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -304,7 +304,7 @@ export const claimConsult = createServerFn({ method: "POST" })
  */
 export const unlockEducation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { consultId: string }) => data)
+  .inputValidator((data: unknown) => unlockEducationInput.parse(data))
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
