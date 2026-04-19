@@ -31,19 +31,25 @@ function ConsultChatPage() {
   const [generating, setGenerating] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [hasContact, setHasContact] = useState(false);
+  const [hasApprovedRx, setHasApprovedRx] = useState(false);
+  const [hasPendingRx, setHasPendingRx] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Initial load
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [msgRes, consultRes] = await Promise.all([
+      const [msgRes, consultRes, rxRes] = await Promise.all([
         supabase
           .from("consult_messages")
           .select("role, content")
           .eq("consult_id", consultId)
           .order("created_at", { ascending: true }),
         supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+        supabase
+          .from("prescriptions")
+          .select("id, status")
+          .eq("consult_id", consultId),
       ]);
       if (cancelled) return;
       if (msgRes.error) {
@@ -58,6 +64,9 @@ function ConsultChatPage() {
       setMessages(all.filter((m) => m.role !== "system"));
       const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
+      const rxRows = (rxRes.data ?? []) as { status: string }[];
+      setHasApprovedRx(rxRows.some((r) => r.status === "approved"));
+      setHasPendingRx(rxRows.some((r) => r.status === "pending_review" || r.status === "escalated"));
       setLoaded(true);
     })();
     return () => {
