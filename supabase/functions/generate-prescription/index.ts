@@ -1,6 +1,29 @@
 // Generate a draft prescription for a consult using tool-calling.
 // Public function — works for anonymous and authenticated consults.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { z } from "https://esm.sh/zod@3.23.8";
+
+// Hard caps to bound prompt size before it hits the AI gateway.
+const MAX_INTAKE_FIELD_CHARS = 2000;
+const MAX_PROMPT_CHARS = 30_000;
+
+const BodySchema = z.object({
+  consultId: z.string().uuid(),
+  anonToken: z.string().max(128).optional(),
+});
+
+function clip(value: unknown, max: number): unknown {
+  if (typeof value === "string") return value.length > max ? value.slice(0, max) + "…[truncated]" : value;
+  if (Array.isArray(value)) return value.slice(0, 50).map((v) => clip(v, max));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = clip(v, max);
+    }
+    return out;
+  }
+  return value;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -107,13 +130,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { consultId, anonToken } = await req.json();
-    if (!consultId) {
-      return new Response(JSON.stringify({ error: "Missing consultId" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const raw = await req.json();
+    const parsed = BodySchema.safeParse(raw);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", issues: parsed.error.flatten() }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
+    const { consultId, anonToken } = parsed.data;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -198,11 +223,18 @@ Deno.serve(async (req) => {
       .eq("consult_id", consultId)
       .order("created_at", { ascending: true });
 
-    const conversation = (msgs ?? [])
-      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    // Truncate intake free-text fields and clip the joined conversation to a
+    // hard char cap so a runaway-long history can't blow up the AI prompt.
+    const clippedIntake = clip(consult.intake, MAX_INTAKE_FIELD_CHARS);
+    let conversation = (msgs ?? [])
+      .map((m) => `${m.role.toUpperCase()}: ${(m.content ?? "").slice(0, MAX_INTAKE_FIELD_CHARS)}`)
       .join("\n\n");
+    if (conversation.length > MAX_PROMPT_CHARS) {
+      // Keep the tail — most recent context matters most for drafting.
+      conversation = "…[earlier messages truncated]\n\n" + conversation.slice(-MAX_PROMPT_CHARS);
+    }
 
-    const userPayload = `INTAKE:\n${JSON.stringify(consult.intake, null, 2)}\n\nCONVERSATION:\n${conversation}\n\nDraft the prescription now using the submit_prescription tool.`;
+    const userPayload = `INTAKE:\n${JSON.stringify(clippedIntake, null, 2)}\n\nCONVERSATION:\n${conversation}\n\nDraft the prescription now using the submit_prescription tool.`;
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",

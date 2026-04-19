@@ -3,6 +3,29 @@
 // presents either (a) the anonToken whose hash matches the consult, or
 // (b) a valid bearer JWT for the consult's owner.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { z } from "https://esm.sh/zod@3.23.8";
+
+// Length caps mirror src/lib/consult-schema.ts. Keep these in sync.
+// TODO: longer term, load message history from the DB instead of trusting
+// the client-supplied array — this would close the conversation-history
+// injection vector entirely. Out of scope for this pass.
+const MAX_MESSAGES = 50;
+const MAX_MESSAGE_CHARS = 4000;
+const MAX_TOTAL_CHARS = 30_000;
+
+const BodySchema = z.object({
+  consultId: z.string().uuid(),
+  anonToken: z.string().max(128).optional(),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string().max(MAX_MESSAGE_CHARS),
+      }),
+    )
+    .min(1)
+    .max(MAX_MESSAGES),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,10 +78,20 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { consultId, messages, anonToken } = await req.json();
-    if (!consultId || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: "Missing consultId or messages" }), {
-        status: 400,
+    const raw = await req.json();
+    const parsed = BodySchema.safeParse(raw);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", issues: parsed.error.flatten() }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    const { consultId, messages, anonToken } = parsed.data;
+
+    const totalChars = messages.reduce((n, m) => n + m.content.length, 0);
+    if (totalChars > MAX_TOTAL_CHARS) {
+      return new Response(JSON.stringify({ error: "Payload too large" }), {
+        status: 413,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
