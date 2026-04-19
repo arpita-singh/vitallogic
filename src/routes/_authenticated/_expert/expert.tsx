@@ -128,8 +128,9 @@ function ExpertDashboard() {
 
   // Realtime
   useEffect(() => {
+    // Private channel: realtime.messages RLS limits subscription to experts/admins.
     const channel = supabase
-      .channel(`expert-queue`)
+      .channel(`expert-queue`, { config: { private: true } })
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "prescriptions" },
