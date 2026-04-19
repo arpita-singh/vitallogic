@@ -1,91 +1,74 @@
 
 
-# Vital Logic — v1 MVP Plan
+# Phase 2 — Cloud, Schema, Auth & Guards
 
-A mobile-first marketing site + AI symptom consult, with a real expert review queue behind auth. Visual language matches the deck: deep indigo/black, glowing gold + violet accents, lotus/circuit motifs, serif display + clean sans body.
+## 1. Enable Lovable Cloud
+Turn on Cloud so we get Supabase (Postgres + Auth) and the auto-generated `client.ts` / `auth-middleware.ts` / `client.server.ts`.
 
-## 1. Brand & design system
-- Colors (dark theme default): near-black indigo background `#0B0A1A`, surface `#15122B`, gold `#E8B85C`, violet `#7B5BD9`, soft cream text.
-- Typography: serif display (Cormorant Garamond / Fraunces) for headings, Inter for body.
-- Motifs: lotus + circuit-board imagery (use the deck's hero art as the homepage hero), subtle radial glows behind CTAs, thin gold dividers.
-- Mobile-first: bottom-anchored CTAs, sticky chat launcher, touch-friendly tap targets, hamburger nav.
+## 2. Database schema (one migration)
 
-## 2. Marketing site (separate routes for SSR/SEO)
-- `/` — Home: hero (lotus/circuit, "The Amazon of Health"), mission, "From Medication to Education" section, four pillars teaser, CTA → Start free consult.
-- `/philosophy` — Mission, core promise, pill-for-an-ill → systemic empowerment story.
-- `/pillars` — The four pillars (Consult, Prescribe, Medicate, Educate) with icons.
-- `/journey` — Customer journey: AI Intake → DB Match → Human Audit → Empowerment.
-- `/integrity` — Playwright SRE layer: AUST L/ARTG checks, 99.9% uptime promise, integrity guardrails.
-- `/origins` — Global wisdom origins (Ayurveda, Western Naturopathy, Indigenous, Psychedelic).
-- `/consult` — entry point for the AI consult flow.
-- Per-route `head()` metadata (title, description, og:title, og:description) for each.
-- Shared header (logo + nav + "Start consult" CTA) and footer (links + disclaimer that this is not medical advice).
+**Enums**
+- `app_role`: `'user' | 'expert' | 'admin'`
+- `consult_status`: `'draft' | 'pending_review' | 'approved' | 'rejected' | 'escalated'`
+- `prescription_status`: same as consult_status minus `draft`
 
-## 3. AI Consult — Hybrid intake
-A multi-step guided intake, then opens into free chat for follow-ups, then produces a draft prescription queued for expert review.
+**Tables (all RLS enabled)**
+- `profiles` — `id (uuid PK → auth.users)`, `display_name`, `avatar_url`, `created_at`. Trigger `handle_new_user()` auto-creates row on signup.
+- `user_roles` — `id`, `user_id → auth.users`, `role app_role`, unique `(user_id, role)`. **Roles live here, never on profiles.**
+- `consults` — `id`, `user_id (nullable for anon)`, `intake jsonb`, `status consult_status`, `created_at`, `updated_at`.
+- `consult_messages` — `id`, `consult_id`, `role ('user'|'assistant'|'system')`, `content text`, `created_at`.
+- `prescriptions` — `id`, `consult_id`, `draft jsonb`, `final jsonb null`, `status`, `reviewed_by null`, `reviewed_at null`, `review_notes`, `created_at`.
+- `prescription_audit` — `id`, `prescription_id`, `actor_id`, `action`, `diff jsonb`, `created_at`.
 
-**Step A — Structured intake (mobile-friendly card stepper):**
-1. Primary symptom(s) — chips + free text
-2. Duration & severity — slider
-3. Lifestyle snapshot — sleep, stress, diet, activity
-4. Existing meds / allergies / pregnancy flag (safety gates)
-5. Goals — relief, prevention, education
+**Security definer function**
+```sql
+create function public.has_role(_user_id uuid, _role app_role)
+returns boolean language sql stable security definer set search_path = public
+as $$ select exists(select 1 from public.user_roles where user_id=_user_id and role=_role) $$;
+```
 
-**Step B — Open chat:** free-form follow-ups with the AI (Lovable AI Gateway, default `google/gemini-3-flash-preview`, streaming, markdown rendered). System prompt encodes the Vital Logic philosophy + safety rules (always recommend seeing a doctor for red-flag symptoms, no diagnosis claims).
+**RLS policy summary**
+- `profiles`: owner select/update; everyone insert own row.
+- `user_roles`: user can select own roles; only admins insert/update/delete (`has_role(auth.uid(),'admin')`).
+- `consults`: owner CRUD own rows; experts/admins select all `pending_review`/`escalated`/`approved`/`rejected`; anon inserts allowed (user_id null).
+- `consult_messages`: same access pattern as parent consult (via subquery on consult ownership + role checks).
+- `prescriptions`: owner select if `status='approved'`; experts/admins select+update all; insert via server only.
+- `prescription_audit`: insert by experts/admins; select by experts/admins.
 
-**Step C — Draft prescription:** AI uses tool-calling to output a structured `DraftPrescription` (1–2 specific recommendations, each with rationale, suggested products, modality tags: Ayurveda / Western / Indigenous / Plant medicine, safety notes, citations). Saved to DB with status `pending_review`.
+## 3. Auth client wiring
+- `src/lib/auth.tsx` — `AuthProvider` + `useAuth()` hook. Wraps `supabase.auth.onAuthStateChange` (set up BEFORE `getSession()`), exposes `{ user, session, roles, isAuthenticated, hasRole, signIn, signUp, signOut, loading }`.
+- Fetches roles from `user_roles` after session resolves; memoizes `hasRole`.
+- Mount provider in `__root.tsx` around `<Outlet />`.
+- Pass `auth` into router context via `createRootRouteWithContext<{ auth: AuthState }>` so `beforeLoad` guards can read it.
 
-**Step D — Confirmation screen:** "Your recommendation is being reviewed by a human expert. We'll notify you when it's ready." Shows estimated wait, lets user create an account (if not yet) to receive it.
+## 4. Routes added
 
-## 4. Accounts & roles
-- Email/password auth (Lovable Cloud).
-- Roles via separate `user_roles` table + `has_role()` security-definer function: `user`, `expert`, `admin`. (No roles on profiles table — prevents privilege escalation.)
-- `profiles` table for display name, avatar, optional health profile fields.
-- Public routes: marketing pages + `/consult` (anonymous consults allowed; account required to see reviewed result).
-- Protected: `/account`, `/account/consults`, `/expert/*`, `/admin/*`.
+**Public**
+- `/login` — email + password, link to `/signup` and forgot password (stub for now).
+- `/signup` — email + password + display name. Uses `emailRedirectTo: window.location.origin`. After signup, redirect to `/account`.
+- `/reset-password` — required pair for future forgot-password (mounted now, simple form).
 
-## 5. Expert review dashboard (`/expert`)
-- Queue list: pending consults sorted oldest-first, with intake summary preview, AI draft, safety flags highlighted.
-- Detail view: full intake transcript + chat history + AI draft prescription. Expert can:
-  - Edit recommendation text, swap products, adjust safety notes
-  - Approve → status `approved`, becomes visible to user
-  - Reject with reason → user sees gentle "we couldn't safely recommend, please consult a clinician" message
-  - Escalate (flag for senior expert)
-- All edits audited (who, when, what changed).
-- Realtime updates so a queue item disappears when another expert claims it (claim/lock pattern to prevent double-review).
+**Protected layout `_authenticated.tsx`** (pathless)
+- `beforeLoad` checks `context.auth.isAuthenticated`; throws `redirect({ to:'/login', search:{ redirect: location.href }})`.
+- Children:
+  - `_authenticated/account.tsx` — display name, email, sign-out, link to "My consults" (placeholder list — Phase 3 will populate).
 
-## 6. Data model (Lovable Cloud / Supabase)
-- `profiles` (id, display_name, avatar_url, created_at)
-- `user_roles` (id, user_id, role enum: 'user'|'expert'|'admin')
-- `consults` (id, user_id nullable for anonymous, intake_jsonb, status enum: 'draft'|'pending_review'|'approved'|'rejected'|'escalated', created_at)
-- `consult_messages` (id, consult_id, role: 'user'|'assistant'|'system', content, created_at) — full chat history
-- `prescriptions` (id, consult_id, draft_jsonb, final_jsonb nullable, reviewed_by, reviewed_at, review_notes, status)
-- `prescription_audit` (id, prescription_id, actor_id, action, diff_jsonb, created_at)
-- RLS: users see only their own consults/prescriptions; experts see all `pending_review`/`escalated` via `has_role(auth.uid(), 'expert')`; admins everything.
+**Expert-only layout `_authenticated/_expert.tsx`** (pathless)
+- `beforeLoad` checks `context.auth.hasRole('expert') || context.auth.hasRole('admin')`; otherwise redirect to `/unauthorized`.
+- Children:
+  - `_authenticated/_expert/expert.tsx` → `/expert` — placeholder queue page ("Phase 3 will wire this up").
 
-## 7. Server-side
-- `createServerFn` for: starting a consult, sending a chat message (streams from Lovable AI Gateway), submitting intake → generating draft prescription via tool-call, expert claim/approve/reject actions.
-- AI calls go through an edge function (`/functions/v1/consult-chat`) using `LOVABLE_API_KEY`; system prompt lives server-side and references the Vital Logic philosophy + safety rails.
-- Structured prescription output via tool-calling schema (so we never parse free-form JSON).
+**Misc**
+- `/unauthorized` — friendly "you don't have access" page with link home.
 
-## 8. Safety & legal
-- Persistent footer disclaimer: "Vital Logic is not a substitute for professional medical care."
-- Red-flag detector in system prompt (chest pain, suicidal ideation, pregnancy + certain herbs, etc.) → AI immediately recommends emergency/professional care and flags consult as `escalated`.
-- Pregnancy/medication interaction gates in intake.
+## 5. Header updates
+- `SiteHeader`: when authenticated, swap "Start consult" CTA group to show "Account" link + "Sign out"; when expert/admin, also show "Expert" link.
 
-## 9. What's intentionally NOT in v1
-- Marketplace / product catalog / checkout (Pillar 3)
-- Personalized Education package generation (Pillar 4)
-- Playwright TGA scraping bots (Pillar SRE layer — marketing page only for now)
-- Notifications (email/SMS when prescription approved) — shown as "coming soon"; user just refreshes `/account/consults`
+## 6. Files to create / edit
+- New: `src/lib/auth.tsx`, `src/routes/login.tsx`, `src/routes/signup.tsx`, `src/routes/reset-password.tsx`, `src/routes/unauthorized.tsx`, `src/routes/_authenticated.tsx`, `src/routes/_authenticated/account.tsx`, `src/routes/_authenticated/_expert.tsx`, `src/routes/_authenticated/_expert/expert.tsx`.
+- Edit: `src/routes/__root.tsx` (AuthProvider + router context type), `src/router.tsx` (context shape), `src/components/site-header.tsx` (auth-aware nav).
+- Migration: one SQL file with enums, tables, trigger, `has_role`, all RLS policies.
 
-## 10. Build order
-1. Design tokens + dark theme + typography + shared header/footer
-2. Marketing routes with deck content + per-route SEO
-3. Auth (email/password) + profiles + user_roles + role-based guards
-4. Consult schema + intake stepper UI
-5. AI chat edge function (streaming) + chat UI with markdown
-6. Tool-calling draft prescription generator + confirmation screen
-7. Expert dashboard (queue, detail, claim/approve/reject, audit)
-8. Polish: animations, glow effects, mobile QA at 380px
+## 7. Out of scope (next phase)
+Intake stepper UI, AI chat edge function, prescription generation, expert review actions, audit writes — all Phase 3.
 
