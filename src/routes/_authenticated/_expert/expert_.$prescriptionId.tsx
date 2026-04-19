@@ -79,7 +79,7 @@ function ReviewPage() {
     }
     const presc = p as unknown as Prescription;
     setRx(presc);
-    setEdit((presc.final ?? presc.draft) as RxData);
+    setEdit(normalizeRx((presc.final ?? presc.draft) as Partial<RxData> | null));
     setAttachedProducts((presc.attached_products ?? []) as AttachedProduct[]);
     setNotes(presc.review_notes ?? "");
 
