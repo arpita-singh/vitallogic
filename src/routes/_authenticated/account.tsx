@@ -1,11 +1,16 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
 import { claimConsult } from "@/lib/consult-server";
 
+type AccountSearch = { ready?: number };
+
 export const Route = createFileRoute("/_authenticated/account")({
+  validateSearch: (search: Record<string, unknown>): AccountSearch => ({
+    ready: search.ready === "1" || search.ready === 1 ? 1 : undefined,
+  }),
   head: () => ({
     meta: [{ title: "My account — Vital Logic" }],
   }),
@@ -44,8 +49,11 @@ const STATUS_STYLES: Record<string, string> = {
 function AccountPage() {
   const { user, roles, signOut, hasAnyRole } = useAuth();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [displayName, setDisplayName] = useState<string>("");
   const [consults, setConsults] = useState<ConsultRow[]>([]);
+  const [highlightReady, setHighlightReady] = useState(false);
+  const readyBannerRef = useRef<HTMLDivElement | null>(null);
 
   // Claim any anonymous consult stashed in localStorage
   useEffect(() => {
