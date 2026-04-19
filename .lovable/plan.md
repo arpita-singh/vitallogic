@@ -1,94 +1,91 @@
 
-I reviewed the relevant files plus the network trace, and the core issue is now clear:
+## Plan — Fix the patient prescription loop and make the ready action open the actual approved result
 
-1. The approved prescription does exist.
-2. The patient account shows nothing because the consult was never actually attached to the signed-in user (`consults.user_id` is still `null`).
-3. The header notification is using prescription-level data that dual-role users can read as experts, so it looks “ready” even when the patient-side ownership handoff failed.
-4. The claim flow is split across two different storage keys (`vl_consult_id` in `localStorage` and `pendingConsultId` in `sessionStorage`), so the redirect/claim logic is inconsistent.
+### What I found
+The bug is real, and the main cause is now clear from the code plus the recorded requests:
 
-The network evidence confirms this:
-- approved prescription rows exist
-- the consult linked to that prescription still has `user_id = null`
-- account consult query returns `[]`, so the patient banner has nothing to show
+1. A single consult can accumulate multiple prescription rows over time.
+2. The header/account treat a consult as “ready” if it has any approved prescription.
+3. But the patient result page currently loads the most recently created prescription row for that consult, not the correct patient-facing one.
+4. So if a consult has an older approved prescription and a newer pending draft, the header says “ready” but the destination resolves to the wrong state.
+5. That mismatch is what makes the flow feel looped and broken.
 
-## Plan — Fix consult claiming + make patient prescription access actually actionable
+The network trace confirms this exact pattern: one consult has several prescriptions, including approved and pending_review rows at the same time.
 
-### 1. Unify the anonymous-to-account claim flow
-Update `src/lib/claim-consult.ts` so there is one source of truth for a pending consult:
-- read both legacy keys for backward compatibility
-- clear both after a successful claim
-- expose one helper used everywhere
+### Implementation
+#### 1) Make the patient result page load the right prescription
+Update `src/routes/consult_.$consultId.result.tsx` so it no longer fetches “latest by created_at”.
 
-Then update:
-- `src/routes/consult.tsx`
+Instead, it should resolve the patient-facing prescription with a clear priority:
+1. approved
+2. rejected
+3. escalated
+4. pending_review
+
+For a patient arriving from the header/account, approved must win over any newer draft. This is the most important fix.
+
+#### 2) Stop the consult from bouncing users back into the wrong experience
+Update `src/routes/consult_.$consultId.tsx` so the consult/chat page detects if the consult already has an approved prescription.
+
+If approved exists:
+- show a prominent “View approved prescription” CTA
+- prevent the user from getting pushed back into the chat/generate loop
+- optionally auto-redirect to `/consult/$consultId/result` when appropriate
+
+This removes the “I keep landing back in the chatbot” feeling.
+
+#### 3) Make the ready pill use patient-facing resolution
+Update `src/components/site-header.tsx` so the gold ready action is driven by the same patient-facing logic as the result page.
+
+That means:
+- keep counting ready consults, not raw prescription rows
+- but only deep-link to consults whose patient-facing state is actually approved
+- ensure the button remains its own distinct clickable action, separate from the Account link
+
+#### 4) Make Account explicitly show “View prescription” vs generic consult navigation
+Update `src/routes/_authenticated/account.tsx` so each ready consult gets a clear prescription action.
+
+For consults with approved prescriptions:
+- primary action: `View prescription`
+
+For consults still under review:
+- secondary/status-only presentation, not misleading navigation
+
+This will make patient navigation obvious even if a user skips the header pill.
+
+#### 5) Prevent duplicate draft confusion at the source
+Update the prescription generation flow so repeated generation doesn’t keep creating ambiguous patient states.
+
+Likely changes:
+- review `supabase/functions/generate-prescription/index.ts`
+- review `src/routes/consult_.$consultId.tsx`
+
+Preferred behavior:
+- reuse/update the current in-progress prescription for a consult when appropriate
+- avoid piling up extra pending rows once a consult already has a visible approved result, unless that is an intentional expert-side revision flow
+
+This reduces future recurrence of the bug.
+
+### Files to modify
 - `src/routes/consult_.$consultId.result.tsx`
-to use the same helper instead of writing different keys in different places.
-
-### 2. Make auth redirect to the claimed consult before anything else
-Update:
-- `src/lib/auth.tsx`
-- `src/routes/login.tsx`
-- `src/routes/signup.tsx`
-- `src/routes/auth.callback.tsx`
-
-So after sign-in/sign-up/OAuth:
-- if a consult was successfully claimed, go straight to `/consult/$consultId/result`
-- otherwise fall back to the existing patient/expert landing logic
-
-This prevents users from signing in and then landing somewhere unrelated while their prescription is still hidden.
-
-### 3. Add a self-healing claim attempt on the result page
-Update `src/routes/consult_.$consultId.result.tsx` so that when a signed-in user lands on a consult result page and that consult is still unclaimed:
-- if it matches the remembered pending consult, attempt to claim it immediately
-- only show the auth gate if that recovery path fails
-
-This makes the result page resilient even if the redirect sequence is imperfect.
-
-### 4. Fix the header notification to use patient-owned consults, not expert-readable prescriptions
-Update `src/components/site-header.tsx`:
-- in patient view, compute ready items from the user’s consults (or unique consult IDs), not raw approved prescription rows
-- dedupe by consult so one consult with multiple approved prescription rows does not break the “single ready prescription” deep link
-- keep the Expert queue logic separate from patient-ready logic
-
-This will stop false/broken notification states for dual-role users.
-
-### 5. Make the header action explicitly actionable
-Also in `src/components/site-header.tsx`:
-- keep `Account` as a stable link to `/account`
-- add a distinct prescription-ready action/pill/badge beside it when there is something ready
-- if exactly one ready consult exists, link directly to that result page
-- if multiple exist, link to the ready banner on account
-
-This removes the current ambiguity where “Account” and the notification are bundled into one weak action.
-
-### 6. Strengthen the account page ready banner
-Update `src/routes/_authenticated/account.tsx`:
-- ensure the banner is driven by patient-owned consults only
-- preserve the highlight/scroll behavior for `?ready=1`
-- show a clear empty state if the user is authenticated but nothing has been claimed yet
-- optionally add a small fallback notice if a pending consult is detected but not yet attached, so the UI doesn’t feel broken
-
-## Files to modify
-- `src/lib/claim-consult.ts`
-- `src/lib/auth.tsx`
-- `src/routes/consult.tsx`
-- `src/routes/consult_.$consultId.result.tsx`
-- `src/routes/login.tsx`
-- `src/routes/signup.tsx`
-- `src/routes/auth.callback.tsx`
+- `src/routes/consult_.$consultId.tsx`
 - `src/components/site-header.tsx`
 - `src/routes/_authenticated/account.tsx`
+- `supabase/functions/generate-prescription/index.ts`
 
-## No backend schema changes needed
-This looks like a flow/ownership bug, not a table-design problem:
-- the prescription exists
-- the patient can’t see it because the consult was never claimed
-- current RLS is doing what it should
+### Technical notes
+- No database schema changes are required for the main fix.
+- The core issue is query/selection logic, not missing data.
+- The patient route is consult-based, so it must deterministically choose the correct prescription row for display.
+- I will keep expert review behavior intact while separating patient-visible state from expert drafting state.
 
-## Expected result after this fix
-For a dual-role user:
-- signing in after a consult claims the consult reliably
-- patient view shows the consult on account
-- the ready banner appears correctly
-- the ready notification becomes a real action
-- clicking it opens the prescription instead of sending the user into a dead end
+### Expected result after the fix
+- The gold “Prescription ready” action opens the approved prescription, not the wrong consult state.
+- Account shows a clear, patient-friendly path to the approved result.
+- The consult/chat page stops trapping users in a loop once a prescription is already approved.
+- Dual-role users can still switch views, but patient navigation becomes direct and reliable.
+
+### Out of scope
+- No redesign of the whole expert workflow.
+- No new database tables.
+- No notification history/read-state system in this pass.
