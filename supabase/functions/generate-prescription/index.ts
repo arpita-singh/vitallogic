@@ -128,6 +128,41 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Idempotency: if an approved prescription already exists for this consult,
+    // return it instead of stacking another pending draft. This prevents the
+    // "patient is bounced into a new chat loop" bug.
+    const { data: existingApproved } = await supabase
+      .from("prescriptions")
+      .select("id, status")
+      .eq("consult_id", consultId)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingApproved) {
+      return new Response(
+        JSON.stringify({ prescriptionId: existingApproved.id, status: existingApproved.status }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Also short-circuit if there's already a pending draft awaiting review —
+    // patients shouldn't be able to silently spawn duplicates.
+    const { data: existingPending } = await supabase
+      .from("prescriptions")
+      .select("id, status")
+      .eq("consult_id", consultId)
+      .in("status", ["pending_review", "escalated"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingPending) {
+      return new Response(
+        JSON.stringify({ prescriptionId: existingPending.id, status: existingPending.status }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const { data: msgs } = await supabase
       .from("consult_messages")
       .select("role, content, created_at")

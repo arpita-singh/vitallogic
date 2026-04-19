@@ -31,19 +31,25 @@ function ConsultChatPage() {
   const [generating, setGenerating] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [hasContact, setHasContact] = useState(false);
+  const [hasApprovedRx, setHasApprovedRx] = useState(false);
+  const [hasPendingRx, setHasPendingRx] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Initial load
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [msgRes, consultRes] = await Promise.all([
+      const [msgRes, consultRes, rxRes] = await Promise.all([
         supabase
           .from("consult_messages")
           .select("role, content")
           .eq("consult_id", consultId)
           .order("created_at", { ascending: true }),
         supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+        supabase
+          .from("prescriptions")
+          .select("id, status")
+          .eq("consult_id", consultId),
       ]);
       if (cancelled) return;
       if (msgRes.error) {
@@ -58,6 +64,9 @@ function ConsultChatPage() {
       setMessages(all.filter((m) => m.role !== "system"));
       const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
+      const rxRows = (rxRes.data ?? []) as { status: string }[];
+      setHasApprovedRx(rxRows.some((r) => r.status === "approved"));
+      setHasPendingRx(rxRows.some((r) => r.status === "pending_review" || r.status === "escalated"));
       setLoaded(true);
     })();
     return () => {
@@ -70,9 +79,12 @@ function ConsultChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
 
-  // Send first AI turn automatically once loaded with no assistant messages yet
+  // Send first AI turn automatically once loaded with no assistant messages yet.
+  // Skip entirely if a prescription already exists — the user shouldn't be
+  // dragged back into a chat loop after their consult was processed.
   useEffect(() => {
     if (!loaded || streaming) return;
+    if (hasApprovedRx || hasPendingRx) return;
     const hasAssistant = messages.some((m) => m.role === "assistant");
     const hasUser = messages.some((m) => m.role === "user");
     if (!hasAssistant && !hasUser && intakeSummary) {
@@ -80,7 +92,20 @@ function ConsultChatPage() {
       void send("Hello — I just finished the intake. Could you take a look and ask me your first question?", true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, intakeSummary]);
+  }, [loaded, intakeSummary, hasApprovedRx, hasPendingRx]);
+
+  // Auto-redirect to the result page when an approved prescription exists.
+  // This breaks the "I keep landing in the chatbot" loop for patients
+  // returning to a consult that's already been finalised.
+  useEffect(() => {
+    if (loaded && hasApprovedRx) {
+      void navigate({
+        to: "/consult/$consultId/result",
+        params: { consultId },
+        replace: true,
+      });
+    }
+  }, [loaded, hasApprovedRx, consultId, navigate]);
 
   const send = async (text: string, hidden = false) => {
     if (!text.trim() || streaming) return;
@@ -188,6 +213,36 @@ function ConsultChatPage() {
 
   const userTurns = messages.filter((m) => m.role === "user").length;
   const canGenerate = userTurns >= 3 && !streaming && !generating;
+
+  // If a prescription already exists for this consult, show a focused
+  // CTA instead of the chat — patients shouldn't be looped back into chatting.
+  if (loaded && (hasApprovedRx || hasPendingRx)) {
+    return (
+      <Section className="!py-10 md:!py-16">
+        <div className="mx-auto max-w-xl text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-gold/40 bg-gold/10">
+            <Sparkles className="h-6 w-6 text-gold" />
+          </div>
+          <h1 className="mt-5 font-display text-3xl text-foreground md:text-4xl">
+            {hasApprovedRx ? "Your prescription is ready" : "Your consult is in review"}
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-muted-foreground">
+            {hasApprovedRx
+              ? "A practitioner has approved your recommendation."
+              : "A practitioner is reviewing your draft. We'll have something for you shortly."}
+          </p>
+          <Link
+            to="/consult/$consultId/result"
+            params={{ consultId }}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-gold px-6 py-3 text-sm font-semibold uppercase tracking-wider text-background hover:opacity-90"
+          >
+            <Sparkles className="h-4 w-4" />
+            {hasApprovedRx ? "View prescription" : "View status"}
+          </Link>
+        </div>
+      </Section>
+    );
+  }
 
   return (
     <Section className="!py-6 md:!py-10">

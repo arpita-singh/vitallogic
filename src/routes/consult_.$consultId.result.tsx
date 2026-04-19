@@ -58,13 +58,14 @@ function ResultPage() {
     let cancelled = false;
     const load = async () => {
       const [rxRes, consultRes, unlockRes] = await Promise.all([
+        // Fetch ALL prescriptions for this consult; we resolve patient-facing
+        // priority client-side: approved > rejected > escalated > pending_review.
+        // This ensures an older approved Rx wins over a newer pending draft.
         supabase
           .from("prescriptions")
-          .select("id, status, draft, final, review_notes, attached_products")
+          .select("id, status, draft, final, review_notes, attached_products, created_at")
           .eq("consult_id", consultId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order("created_at", { ascending: false }),
         supabase.from("consults").select("intake, user_id").eq("id", consultId).maybeSingle(),
         user
           ? supabase
@@ -77,7 +78,18 @@ function ResultPage() {
       ]);
       if (cancelled) return;
       if (rxRes.error) console.error(rxRes.error);
-      setRx((rxRes.data as unknown as Rx) ?? null);
+      // Patient-facing priority: approved > rejected > escalated > pending_review
+      const allRx = (rxRes.data ?? []) as unknown as Rx[];
+      const priority: Rx["status"][] = ["approved", "rejected", "escalated", "pending_review"];
+      let chosen: Rx | null = null;
+      for (const status of priority) {
+        const match = allRx.find((r) => r.status === status);
+        if (match) {
+          chosen = match;
+          break;
+        }
+      }
+      setRx(chosen);
       const consultRow = consultRes.data as { intake?: { contactEmail?: string }; user_id?: string | null } | null;
       const intake = (consultRow?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
