@@ -36,6 +36,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let initialized = false;
+
     // 1) Subscribe FIRST
     const {
       data: { subscription },
@@ -45,10 +47,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (newSession?.user) {
         // Defer the supabase call to avoid deadlock
         setTimeout(() => {
-          fetchRoles(newSession.user.id).then(setRoles);
+          fetchRoles(newSession.user.id).then((r) => {
+            setRoles(r);
+            if (!initialized) {
+              initialized = true;
+              setLoading(false);
+            }
+          });
         }, 0);
       } else {
         setRoles([]);
+        if (!initialized) {
+          initialized = true;
+          setLoading(false);
+        }
       }
     });
 
@@ -57,9 +69,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(existing);
       setUser(existing?.user ?? null);
       if (existing?.user) {
-        fetchRoles(existing.user.id).then(setRoles).finally(() => setLoading(false));
+        fetchRoles(existing.user.id).then((r) => {
+          setRoles(r);
+          if (!initialized) {
+            initialized = true;
+            setLoading(false);
+          }
+        });
       } else {
-        setLoading(false);
+        if (!initialized) {
+          initialized = true;
+          setLoading(false);
+        }
       }
     });
 
