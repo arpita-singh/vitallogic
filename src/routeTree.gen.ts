@@ -22,6 +22,7 @@ import { Route as ConsultRouteImport } from './routes/consult'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConsultConsultIdRouteImport } from './routes/consult_.$consultId'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthenticatedOwnerManualRouteImport } from './routes/_authenticated/owner-manual'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
@@ -93,6 +94,11 @@ const ConsultConsultIdRoute = ConsultConsultIdRouteImport.update({
   path: '/consult/$consultId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedOwnerManualRoute =
   AuthenticatedOwnerManualRouteImport.update({
     id: '/owner-manual',
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/owner-manual': typeof AuthenticatedOwnerManualRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/owner-manual': typeof AuthenticatedOwnerManualRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/owner-manual': typeof AuthenticatedOwnerManualRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
   '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
@@ -202,6 +211,7 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/account'
     | '/owner-manual'
+    | '/auth/callback'
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/account'
     | '/owner-manual'
+    | '/auth/callback'
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_expert'
     | '/_authenticated/account'
     | '/_authenticated/owner-manual'
+    | '/auth/callback'
     | '/consult_/$consultId'
     | '/_authenticated/_expert/expert'
     | '/consult_/$consultId/result'
@@ -261,6 +273,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   UnauthorizedRoute: typeof UnauthorizedRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
   ConsultConsultIdRoute: typeof ConsultConsultIdRouteWithChildren
 }
 
@@ -355,6 +368,13 @@ declare module '@tanstack/react-router' {
       path: '/consult/$consultId'
       fullPath: '/consult/$consultId'
       preLoaderRoute: typeof ConsultConsultIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/owner-manual': {
@@ -456,8 +476,18 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   UnauthorizedRoute: UnauthorizedRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
   ConsultConsultIdRoute: ConsultConsultIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}
