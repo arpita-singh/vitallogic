@@ -10,6 +10,8 @@ export type QueueItem = {
   consult_id: string;
   symptoms: string[];
   red_flags: string[];
+  contactName: string | null;
+  contactEmail: string | null;
 };
 
 function timeAgo(iso: string): string {
@@ -70,6 +72,13 @@ export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }
           {timeAgo(item.created_at)}
         </span>
       </div>
+
+      {(item.contactName || item.contactEmail) && (
+        <div className="mt-3 rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+          <p className="text-foreground">{item.contactName || "Anonymous patient"}</p>
+          {item.contactEmail && <p className="mt-0.5 break-all">{item.contactEmail}</p>}
+        </div>
+      )}
 
       {item.symptoms.length > 0 && (
         <p className="mt-3 line-clamp-2 text-sm text-foreground">
