@@ -6,8 +6,16 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
 function createSupabaseAdminClient() {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Worker runtime sometimes has an empty process.env shim — fall back to
+  // import.meta.env which Vite inlines at build time. The service-role key
+  // NEVER falls back to a VITE_ value (that would leak it to the client bundle).
+  const SUPABASE_URL =
+    process.env.SUPABASE_URL ??
+    (import.meta as any).env?.SUPABASE_URL ??
+    (import.meta as any).env?.VITE_SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    (import.meta as any).env?.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error(
