@@ -1,0 +1,239 @@
+// Generate a draft prescription for a consult using tool-calling.
+// Public function — works for anonymous and authenticated consults.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const SYSTEM_PROMPT = `You are the Vital Logic prescription drafting assistant.
+
+You will receive a consult's intake and full conversation. Produce ONE call to the submit_prescription function with 1–2 thoughtful recommendations.
+
+GROUNDING:
+- Draw from the four traditions: Ayurveda, Western Naturopathy, Indigenous medicine, Plant medicine. Pick the modality that best fits the case; "lifestyle" is also valid.
+- Be conservative. Prefer education and gentle interventions.
+- Cite credible sources where you can (textbook chapters, peer-reviewed studies, traditional pharmacopoeias).
+
+RED FLAGS — set escalate=true and list the red_flags if you detect any of:
+- Chest pain, severe shortness of breath, fainting
+- Suicidal ideation or self-harm
+- Severe/sudden bleeding
+- Sudden severe headache, confusion, one-sided weakness
+- Pregnancy + contraindicated herbs
+- Signs of severe infection
+When escalating, the recommendations array should still contain a single entry advising professional/emergency care.
+
+EVERY recommendation must include: title, modality, rationale, suggested_products (may be empty for lifestyle), safety_notes, citations.
+
+A human practitioner will review your draft before it is shown to the user. Be honest about uncertainty.`;
+
+const tool = {
+  type: "function",
+  function: {
+    name: "submit_prescription",
+    description: "Submit the draft Vital Logic prescription.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "1-2 sentence summary of the recommendation." },
+        red_flags: { type: "array", items: { type: "string" } },
+        escalate: { type: "boolean" },
+        recommendations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 2,
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              modality: {
+                type: "string",
+                enum: [
+                  "ayurveda",
+                  "western_naturopathy",
+                  "indigenous",
+                  "plant_medicine",
+                  "lifestyle",
+                ],
+              },
+              rationale: { type: "string" },
+              suggested_products: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    form: { type: "string" },
+                    dosage: { type: "string" },
+                    notes: { type: "string" },
+                  },
+                  required: ["name"],
+                  additionalProperties: false,
+                },
+              },
+              safety_notes: { type: "string" },
+              citations: { type: "array", items: { type: "string" } },
+            },
+            required: [
+              "title",
+              "modality",
+              "rationale",
+              "suggested_products",
+              "safety_notes",
+              "citations",
+            ],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["summary", "red_flags", "escalate", "recommendations"],
+      additionalProperties: false,
+    },
+  },
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const { consultId } = await req.json();
+    if (!consultId) {
+      return new Response(JSON.stringify({ error: "Missing consultId" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    // Pull intake + history
+    const { data: consult, error: cErr } = await supabase
+      .from("consults")
+      .select("id, intake")
+      .eq("id", consultId)
+      .maybeSingle();
+    if (cErr || !consult) {
+      return new Response(JSON.stringify({ error: "Consult not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: msgs } = await supabase
+      .from("consult_messages")
+      .select("role, content, created_at")
+      .eq("consult_id", consultId)
+      .order("created_at", { ascending: true });
+
+    const conversation = (msgs ?? [])
+      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+      .join("\n\n");
+
+    const userPayload = `INTAKE:\n${JSON.stringify(consult.intake, null, 2)}\n\nCONVERSATION:\n${conversation}\n\nDraft the prescription now using the submit_prescription tool.`;
+
+    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userPayload },
+        ],
+        tools: [tool],
+        tool_choice: { type: "function", function: { name: "submit_prescription" } },
+      }),
+    });
+
+    if (!aiResp.ok) {
+      if (aiResp.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Rate limit reached. Please try again in a moment." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (aiResp.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "AI credits exhausted. Please add credits to continue." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const t = await aiResp.text();
+      console.error("AI gateway error", aiResp.status, t);
+      return new Response(JSON.stringify({ error: "AI gateway error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const aiJson = await aiResp.json();
+    const toolCall = aiJson.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall?.function?.arguments) {
+      console.error("No tool call returned", JSON.stringify(aiJson));
+      return new Response(JSON.stringify({ error: "Could not draft prescription" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let draft: {
+      recommendations: unknown[];
+      red_flags: string[];
+      escalate: boolean;
+      summary: string;
+    };
+    try {
+      draft = JSON.parse(toolCall.function.arguments);
+    } catch (e) {
+      console.error("Bad tool arguments", e);
+      return new Response(JSON.stringify({ error: "Could not parse draft" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const status =
+      draft.escalate || (Array.isArray(draft.red_flags) && draft.red_flags.length > 0)
+        ? "escalated"
+        : "pending_review";
+
+    const { data: rx, error: rxErr } = await supabase
+      .from("prescriptions")
+      .insert({ consult_id: consultId, draft, status })
+      .select("id, status")
+      .maybeSingle();
+
+    if (rxErr || !rx) {
+      console.error("insert prescription failed", rxErr);
+      return new Response(JSON.stringify({ error: "Could not save draft" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    await supabase.from("consults").update({ status }).eq("id", consultId);
+
+    return new Response(JSON.stringify({ prescriptionId: rx.id, status: rx.status }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error("generate-prescription error", e);
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+});

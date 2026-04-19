@@ -1,1 +1,7 @@
 project_id = "mmnkfpytfslplyskirod"
+
+[functions.consult-chat]
+verify_jwt = false
+
+[functions.generate-prescription]
+verify_jwt = false
