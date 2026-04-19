@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Mail } from "lucide-react";
-import type { Intake } from "@/lib/consult-server";
+import type { Intake } from "@/lib/consult-types";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Section, SectionHeader } from "@/components/section";
 import { IntakeStepper } from "@/components/consult/intake-stepper";
-import { startConsult, type Intake } from "@/lib/consult-server";
+import { startConsultRequest } from "@/lib/consult-access";
+import type { Intake } from "@/lib/consult-types";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { rememberPendingConsult } from "@/lib/claim-consult";
@@ -56,9 +57,7 @@ function ConsultPage() {
   const handleComplete = async (intake: Intake) => {
     setSubmitting(true);
     try {
-      const { consultId, anonToken } = await startConsult({
-        data: { intake, userId: user?.id ?? null },
-      });
+      const { consultId, anonToken } = await startConsultRequest(intake);
       // Stash for anonymous → account claim later (unified helper).
       // The anonToken is required to read/update the consult later, so it
       // must be stored alongside the consultId.
