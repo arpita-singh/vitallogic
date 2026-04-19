@@ -138,6 +138,43 @@ Deno.serve(async (req) => {
 
     const data = parsed.data;
 
+    // ---- start (anonymous OR authenticated) ------------------------------
+    if (data.action === "start") {
+      const intake = data.intake;
+      const newConsultId = crypto.randomUUID();
+
+      let anonTokenRaw: string | undefined;
+      let anonTokenHash: string | null = null;
+      if (!verifiedUserId) {
+        const bytes = new Uint8Array(32);
+        crypto.getRandomValues(bytes);
+        anonTokenRaw = base64url(bytes);
+        anonTokenHash = await sha256Hex(anonTokenRaw);
+      }
+
+      const { error: insErr } = await admin.from("consults").insert({
+        id: newConsultId,
+        intake: intake as never,
+        user_id: verifiedUserId,
+        anon_token_hash: anonTokenHash,
+        status: "draft",
+      });
+      if (insErr) {
+        console.error("start consult insert failed", insErr);
+        return json({ error: "Could not start consult" }, 500);
+      }
+
+      const { error: msgErr } = await admin.from("consult_messages").insert({
+        consult_id: newConsultId,
+        role: "system",
+        content: intakeSummary(intake),
+        anon_token_hash: anonTokenHash,
+      });
+      if (msgErr) console.error("seed system message failed", msgErr);
+
+      return json({ consultId: newConsultId, anonToken: anonTokenRaw });
+    }
+
     // ---- unlock (requires JWT) -------------------------------------------
     if (data.action === "unlock") {
       if (!verifiedUserId) return json({ error: "Unauthorized" }, 401);
