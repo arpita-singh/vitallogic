@@ -81,16 +81,21 @@ export function SiteHeader() {
     }
     let cancelled = false;
     const load = async () => {
-      // RLS limits this to the patient's own approved prescriptions
-      const { data, count } = await supabase
-        .from("prescriptions")
-        .select("id, consult_id, reviewed_at", { count: "exact" })
-        .eq("status", "approved")
-        .order("reviewed_at", { ascending: false });
+      // Patient-side ready count: derive from CONSULTS the user owns that have
+      // at least one approved prescription. This avoids false counts for
+      // dual-role users (experts) who can read prescriptions globally.
+      const { data } = await supabase
+        .from("consults")
+        .select("id, prescriptions!inner(id, status)")
+        .eq("user_id", user.id)
+        .eq("prescriptions.status", "approved")
+        .order("created_at", { ascending: false });
       if (cancelled) return;
-      const c = count ?? 0;
+      // Dedupe by consult id (defensive — !inner can repeat rows).
+      const uniqueConsultIds = Array.from(new Set((data ?? []).map((r) => r.id)));
+      const c = uniqueConsultIds.length;
       setReadyCount(c);
-      setSingleReadyConsultId(c === 1 && data && data[0] ? data[0].consult_id : null);
+      setSingleReadyConsultId(c === 1 ? uniqueConsultIds[0] : null);
     };
     void load();
     const channel = supabase
