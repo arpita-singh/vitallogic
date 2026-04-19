@@ -65,7 +65,7 @@ function ResultPage() {
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+        supabase.from("consults").select("intake, user_id").eq("id", consultId).maybeSingle(),
         user
           ? supabase
               .from("user_purchases")
@@ -78,8 +78,11 @@ function ResultPage() {
       if (cancelled) return;
       if (rxRes.error) console.error(rxRes.error);
       setRx((rxRes.data as unknown as Rx) ?? null);
-      const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
+      const consultRow = consultRes.data as { intake?: { contactEmail?: string }; user_id?: string | null } | null;
+      const intake = (consultRow?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
+      setIntakeEmail(intake.contactEmail);
+      setConsultOwnerId(consultRow?.user_id ?? null);
       setUnlocked((unlockRes.data?.length ?? 0) > 0);
       setLoading(false);
     };
