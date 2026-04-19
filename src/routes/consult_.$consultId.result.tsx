@@ -78,7 +78,18 @@ function ResultPage() {
       ]);
       if (cancelled) return;
       if (rxRes.error) console.error(rxRes.error);
-      setRx((rxRes.data as unknown as Rx) ?? null);
+      // Patient-facing priority: approved > rejected > escalated > pending_review
+      const allRx = ((rxRes.data ?? []) as unknown as Rx[]) ?? [];
+      const priority: Rx["status"][] = ["approved", "rejected", "escalated", "pending_review"];
+      let chosen: Rx | null = null;
+      for (const status of priority) {
+        const match = allRx.find((r) => r.status === status);
+        if (match) {
+          chosen = match;
+          break;
+        }
+      }
+      setRx(chosen);
       const consultRow = consultRes.data as { intake?: { contactEmail?: string }; user_id?: string | null } | null;
       const intake = (consultRow?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
