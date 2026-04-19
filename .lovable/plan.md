@@ -1,46 +1,37 @@
 
+The runtime errors show the dev/preview server can't find `SUPABASE_SERVICE_ROLE_KEY` in `process.env` at runtime. The secret IS configured in Lovable Cloud (it shows up in the secrets list), but it's only available to **Supabase Edge Functions** — not to the **TanStack Start server functions** running in our Worker SSR runtime.
 
-## Diagnosis
+The `client.server.ts` file reads `SUPABASE_SERVICE_ROLE_KEY` from `process.env` (or `import.meta.env` as a build-time fallback). Neither has it:
+- `.env` only contains `VITE_*` and the publishable key — no service role
+- The Lovable Cloud "secrets" list is for edge functions, not the Worker
 
-The consult data is **not deleted** — it's all still in the database (1 consult, 6 prescriptions, 13 messages, all owned by your account). The problem is a permissions regression introduced by one of the recent security migrations.
+This is why every server function that touches `supabaseAdmin` (`getConsult`, `claimConsult`, `saveConsultContact`, `startConsult`, `unlockEducation`) is throwing — and the result page goes blank because the loader rejects.
 
-### Root cause
+The session replay also explains the "Maximum update depth exceeded" — it's the router retry-loop firing when the loader keeps rejecting.
 
-The `has_role(_user_id, _role)` SECURITY DEFINER function was recreated by a recent migration. When you `CREATE OR REPLACE FUNCTION` in Postgres, all existing grants on that function are wiped. Compare current grants:
+## Fix
 
-```
-guard_user_roles_write → {anon=X, authenticated=X, service_role=X, ...}  ✅ default grants present
-has_role               → {postgres=X, service_role=X, sandbox_exec=X}    ❌ no anon/authenticated
-```
-
-Because `has_role` is referenced in the SELECT RLS policies on `consults`, `prescriptions`, `consult_messages`, `user_purchases`, `prescription_audit`, `user_roles`, and `certified_materia_medica` (the "experts can select all" branch), Postgres tries to evaluate it for every authenticated query — and fails with:
+Add `SUPABASE_SERVICE_ROLE_KEY` to the project's `.env` file so it becomes available to the server runtime via `process.env` (Vite injects non-`VITE_` keys into the Node/Worker process during dev and bakes them into the SSR bundle for production).
 
 ```
-{"code":"42501","message":"permission denied for function has_role"}
+SUPABASE_SERVICE_ROLE_KEY="<paste service role key here>"
 ```
 
-The browser network log confirms this: every `GET /rest/v1/consults` call from your account is returning 403 with that exact error. The owner-scoped `(auth.uid() = user_id)` policy never gets a chance because policy evaluation short-circuits when any referenced function isn't callable.
+The value already exists in Lovable Cloud (visible in the secrets panel as `SUPABASE_SERVICE_ROLE_KEY`). I just need to copy it into `.env` so the TanStack Start Worker can see it.
 
-### Fix
+### Steps once approved
+1. Open `.env` and append `SUPABASE_SERVICE_ROLE_KEY="..."` (I'll fetch the existing secret value from Lovable Cloud).
+2. Restart the dev server (automatic on `.env` change).
+3. Reload `/consult/.../result` — `getConsult` succeeds, the page renders, the infinite-loop error stops.
 
-A single one-line migration restoring the function's EXECUTE privileges:
-
-```sql
-GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role)
-  TO anon, authenticated, service_role;
-```
-
-This is purely a permissions restoration — no schema change, no policy change, no security weakening. The function is still SECURITY DEFINER with `SET search_path = public`, and its body still only reads from `user_roles`, so granting EXECUTE to `authenticated` is exactly the original (and intended) state.
-
-### Verification after applying
-
-1. Reload `/account` — your existing consult should reappear with its "Awaiting review" / "Ready" status.
-2. The approved-prescription banner at the top should show the 4 approved prescriptions.
-3. Expert dashboard (if you have the role) should also reload correctly.
-
-### Files changed
-- New migration: `supabase/migrations/<timestamp>_restore_has_role_grants.sql`
+### Why this is safe
+- `.env` is gitignored.
+- The key is read only by `client.server.ts`, which is bundled exclusively into the SSR/Worker bundle (Vite blocks `*.server.*` imports from the client).
+- No `VITE_` prefix means it never enters the client bundle.
 
 ### Out of scope
-- No code changes. No RLS policy changes. The previous security fixes (input validation, role-write trigger, error masking) remain in place.
+- No code changes. No schema changes. No security regressions.
+- The earlier `has_role` GRANT migration stays in place — that fix is still correct and needed.
 
+### Files changed
+- `.env` (one line appended)
