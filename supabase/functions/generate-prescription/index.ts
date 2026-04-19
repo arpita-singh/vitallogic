@@ -140,9 +140,6 @@ Deno.serve(async (req) => {
     }
     const { consultId, anonToken } = parsed.data;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -181,6 +178,11 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Check API key only AFTER authorization, so unauthenticated callers get
+    // a 401 rather than a 500 that could hint at server configuration state.
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     // Idempotency: if an approved prescription already exists for this consult,
     // return it instead of stacking another pending draft. This prevents the
@@ -326,9 +328,11 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
+    // Log the full error server-side for debugging, but never leak internal
+    // details (config errors, stack traces, library messages) to the client.
     console.error("generate-prescription error", e);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
