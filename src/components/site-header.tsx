@@ -127,9 +127,17 @@ export function SiteHeader() {
               )}
               <Link
                 to="/account"
-                className="hidden rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
+                className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
               >
                 Account
+                {readyCount > 0 && (
+                  <span
+                    className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background"
+                    aria-label={`${readyCount} prescription${readyCount === 1 ? "" : "s"} ready`}
+                  >
+                    {readyCount}
+                  </span>
+                )}
               </Link>
             </>
           ) : (
