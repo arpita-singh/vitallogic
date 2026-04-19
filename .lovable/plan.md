@@ -1,66 +1,64 @@
 
-Do I know what the issue is? Yes.
 
-The prescription data is still there. The current failure is a runtime architecture bug, not deleted data.
+## Scope check
 
-## What happened
-Two separate regressions are showing up on the result page:
+`src/lib/consult-server.ts` is NOT fully unused — it still exports things that are actively imported:
 
-1. `getConsult` now runs through `src/lib/consult-server.ts`, which uses `supabaseAdmin` from `src/integrations/supabase/client.server.ts`.
-2. That admin client requires `SUPABASE_SERVICE_ROLE_KEY`, but the Worker server runtime serving TanStack server functions does not have that secret, so `getConsult` throws immediately.
-3. After that failure, the page falls into the recovery path and repeatedly calls `claimConsult`, but that server function uses `requireSupabaseAuth`, and the browser is not sending an Authorization header to the server function request, so it returns `401 Unauthorized` over and over.
-4. Result: the page gets stuck on “Linking your consult to your account…” or shows a blank/runtime error.
+| Export | Used by |
+|---|---|
+| `startConsult` (server fn) | `src/routes/consult.tsx` (creates every new consult) |
+| `Intake` type | `src/routes/consult.tsx`, `src/components/consult/intake-stepper.tsx`, `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` |
+| `getConsult`, `saveConsultContact`, `claimConsult`, `unlockEducation` | nothing — already replaced by `consult-access` edge function |
 
-The earlier database permission fix was still correct; this is a different problem.
+`src/lib/consult-schema.ts` is only imported by `consult-server.ts` itself — once `startConsult` migrates, it can also go.
+
+So "delete the file" actually means: **finish the edge-function migration for `start` first, then delete both files cleanly.**
 
 ## Plan
-1. Remove the Worker-only dependency on the missing admin secret for the consult result flow.
-   - Refactor the result page so signed-in owners load consult + prescription data through the browser client and existing RLS policies instead of `getConsult`.
-   - Keep the page usable even if the server helper fails.
 
-2. Rework anonymous consult access into a runtime that can actually verify the anon token.
-   - Move anonymous consult read/save/claim behavior out of the current TanStack server-function path that depends on `supabaseAdmin`.
-   - Use a dedicated backend function endpoint for anon-token verification and consult lookup/update, since that runtime already has the required secret support.
-   - Preserve the current security model: raw anon token stays client-side, only the hash is stored.
+1. **Add `start` action to the `consult-access` edge function**
+   - Accept `{ action: "start", intake }`.
+   - Validate `intake` server-side using the same shape as the old zod schema (mirrored in Deno, like the other edge functions already do).
+   - If the caller has a verified JWT → set `user_id`, no anon token.
+   - Otherwise → mint a 32-byte base64url anon token, store SHA-256 hash, return raw token to caller exactly once.
+   - Insert the consult row + seed system message with the intake summary (port `intakeSummary` helper).
+   - Return `{ consultId, anonToken? }`.
 
-3. Fix the broken claim flow.
-   - Stop the current auto-claim loop from firing indefinitely on the result page.
-   - Update the claim path so authenticated users send their session token explicitly to the backend claim endpoint.
-   - After a successful claim, refresh local consult ownership state once and render the prescription page normally.
+2. **Add `startConsultRequest` to `src/lib/consult-access.ts`**
+   - Thin wrapper around `supabase.functions.invoke("consult-access", { body: { action: "start", intake } })`.
+   - Returns `{ consultId, anonToken? }`.
 
-4. Fix the unlock flow the same way.
-   - `unlockEducation` currently has the same auth/header problem as `claimConsult`.
-   - Move it to the same authenticated backend pattern so “unlock Owner’s Manual” works reliably.
+3. **Move the `Intake` type to a client-safe module**
+   - Create `src/lib/consult-types.ts` exporting just the `Intake` type (no zod, no server imports).
+   - Update the three importers:
+     - `src/routes/consult.tsx`
+     - `src/components/consult/intake-stepper.tsx`
+     - `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`
 
-5. Add safer UI fallbacks.
-   - If consult loading fails, show a clear access/error state instead of leaving the screen stuck.
-   - Avoid infinite “linking” UI when the claim request fails.
-   - Keep the sign-in prompt path intact for users who do not own the consult.
+4. **Switch `src/routes/consult.tsx` to the edge function**
+   - Replace `startConsult({ data: { intake, userId } })` with `startConsultRequest(intake)`.
+   - Drop the `userId` argument (the edge function derives it from the JWT — never trust client-supplied user ids, same rule as everywhere else).
 
-## Files I expect to update
-- `src/routes/consult_.$consultId.result.tsx`
-- `src/routes/consult_.$consultId.index.tsx`
-- `src/lib/consult-server.ts`
-- `src/lib/claim-consult.ts`
-- `src/components/consult/contact-capture.tsx`
-- a new authenticated/anonymous backend endpoint for consult access/claim/unlock
+5. **Delete the now-orphan files**
+   - `src/lib/consult-server.ts`
+   - `src/lib/consult-schema.ts` (only consumer was consult-server)
+   - Leave `supabase/functions/consult-chat/index.ts`'s "Keep these in sync" comment intact — the caps still mirror what's now defined in the edge function.
 
-## Technical details
-```text
-Current broken path:
-Result page -> getConsult serverFn -> supabaseAdmin -> missing service-role env -> throw
-           -> fallback auto-claim -> claimConsult serverFn -> no auth header -> 401 loop
+## Verification
 
-Planned path:
-Signed-in owner -> browser Supabase client + RLS
-Anonymous owner -> dedicated backend endpoint with anonToken verification
-Claim/unlock    -> explicit authenticated backend request with Bearer token
-```
+- Start a fresh consult while signed out → consult created, anon token persisted via `rememberPendingConsult`, redirect to `/consult/$consultId` works.
+- Start a fresh consult while signed in → consult created, attributed to user, no anon token returned.
+- Existing consult result page still loads (uses `readConsult`, unchanged).
+- TypeScript build passes (no dangling imports of `@/lib/consult-server` or `@/lib/consult-schema`).
 
-## Verification after implementation
-- Open `/consult/<id>/result` while signed in as the consult owner: page loads without runtime error.
-- Approved prescriptions render again.
-- Pending-review consult no longer gets stuck on “Linking your consult…”.
-- Anonymous consult from the original browser still works.
-- Claim-after-login succeeds once, then the page refreshes into the normal owner view.
-- Unlock Owner’s Manual works for an approved consult.
+## Files
+
+- Edit: `supabase/functions/consult-access/index.ts` (add `start` action + intake validator + system-message seeding)
+- Edit: `src/lib/consult-access.ts` (add `startConsultRequest`)
+- Create: `src/lib/consult-types.ts` (`Intake` type only)
+- Edit: `src/routes/consult.tsx` (swap import + call)
+- Edit: `src/components/consult/intake-stepper.tsx` (swap `Intake` import)
+- Edit: `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (swap `Intake` import)
+- Delete: `src/lib/consult-server.ts`
+- Delete: `src/lib/consult-schema.ts`
+
