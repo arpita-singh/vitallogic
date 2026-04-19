@@ -1,67 +1,50 @@
 
 
-## What the finding really says
+## Fix — `user_roles_self_escalation`
 
-Two RLS policies on `consults` are wide open for anonymous rows (`user_id IS NULL`):
+### Root cause
+`public.has_role(_user_id uuid, _role app_role)` is `SECURITY DEFINER` and accepts any `_user_id`. Although every RLS policy in this project currently passes `auth.uid()`, the function is still callable by any authenticated user via PostgREST RPC with an arbitrary uuid, letting them probe other users' roles. The scanner is flagging that the function does not enforce caller identity internally.
 
-- **`Consults: anyone can select anonymous`** — anyone with the consult table can read every anonymous intake, which contains health symptoms, meds, allergies, pregnancy status, contact email, etc.
-- **`Consults: anyone can update anonymous`** — anyone can also overwrite any anonymous consult's intake.
+### Fix
+Harden `has_role` so it only ever checks the calling user, regardless of what `_user_id` is passed. This neutralises the enumeration vector while remaining 100% backwards compatible with every existing RLS policy (all of them already pass `auth.uid()`).
 
-Combined with `Messages: anyone can select for anonymous consults` and `owner can insert via consult`, the entire anonymous flow is essentially public — any visitor who knows or guesses a consult id can read and modify other people's intake and chat.
+Two safe options — I'll do option A because it preserves the existing function signature and avoids touching policies/types:
 
-This is a real vulnerability because intake data is sensitive health information.
+**Option A (chosen): keep the signature, ignore the argument internally**
 
-## Fix approach: bind anonymous consults to a per-browser secret
+```sql
+create or replace function public.has_role(_user_id uuid, _role public.app_role)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.user_roles
+    where user_id = auth.uid()      -- always the caller
+      and role    = _role
+  )
+$$;
 
-The cleanest fix that keeps the "start a consult before signing up" UX is to give each anonymous consult an unguessable secret token, store it only in the browser that created it, and require that token on every server-side read/update. RLS then drops the public policies entirely.
+revoke all on function public.has_role(uuid, public.app_role) from public, anon;
+grant execute on function public.has_role(uuid, public.app_role) to authenticated;
+```
 
-### Database changes (migration)
-1. Add `anon_token_hash text` column to `consults` (stores SHA-256 of the secret, not the raw token).
-2. Add `anon_token_hash text` column to `consult_messages` (denormalized for RLS), populated when the message is inserted.
-3. Drop the four overly-permissive policies:
-   - `Consults: anyone can select anonymous`
-   - `Consults: anyone can update anonymous`
-   - `Messages: anyone can select for anonymous consults`
-   - `Messages: owner can insert via consult` (the anonymous half)
-4. Keep `Consults: anyone can insert` but tighten it so the inserted row must include a non-null `anon_token_hash` whenever `user_id` is null.
-5. All anonymous reads/updates now go through server functions that verify the token server-side using the service role key — RLS no longer needs a public anonymous-read path.
-
-### Server-side changes
-- `src/lib/consult-server.ts`
-  - `startConsult`: generate a random 32-byte token, return it to the browser, store its SHA-256 hash on the consult row. Use the service-role client for inserts so RLS doesn't need a public path.
-  - Add `getConsult({ consultId, anonToken? })`: returns intake + messages + prescription status. Verifies either signed-in ownership OR matching `anon_token_hash`.
-  - `saveConsultContact`: require and verify `anonToken` for anonymous updates.
-  - `claimConsult` / auto-claim: also accept `anonToken` so a freshly signed-in user can claim only consults they actually own.
-- `supabase/functions/consult-chat/index.ts`: require `anonToken` (or a valid bearer JWT whose `auth.uid()` owns the consult) before persisting messages. Reject otherwise.
-
-### Client changes
-- `src/lib/claim-consult.ts`: store `{ consultId, anonToken }` together in `sessionStorage` (and mirror in `localStorage` for cross-tab recovery). Pass the token on claim.
-- `src/routes/consult_.$consultId.index.tsx`: stop reading `consults` / `consult_messages` / `prescriptions` directly via the anon Supabase client. Instead call the new `getConsult` server function with the stored token, and send the token in the chat fetch and `generate-prescription` invoke.
-- `src/components/consult/contact-capture.tsx`: pass the stored token through `saveConsultContact`.
-- `src/routes/consult_.$consultId.result.tsx`: same — fetch via server function with token (or via signed-in RLS for owners).
-
-### What this gives us
-- Anonymous intake is no longer publicly readable: knowing a consult id is not enough; the secret token is required.
-- Anonymous intake can no longer be modified by anyone other than the original browser session (or, after claim, the owning user).
-- The expert/admin paths are unaffected (they go through `has_role` policies).
-- Signed-in patients are unaffected (they go through `auth.uid() = user_id`).
+Notes:
+- `_user_id` becomes a no-op kept only for signature compatibility with existing policies and the generated TS types.
+- `revoke ... from anon` removes the unauthenticated probe surface. `authenticated` keeps RLS working.
+- No application code change required. No `types.ts` change required.
 
 ### Files to change
-- New migration in `supabase/migrations/`
-- `src/lib/consult-server.ts`
-- `src/lib/claim-consult.ts`
-- `src/routes/consult_.$consultId.index.tsx`
-- `src/routes/consult_.$consultId.result.tsx`
-- `src/components/consult/contact-capture.tsx`
-- `src/routes/consult.tsx` (capture token returned by `startConsult`)
-- `supabase/functions/consult-chat/index.ts`
-- `supabase/functions/generate-prescription/index.ts` (verify token if no JWT)
+- New migration: `supabase/migrations/<timestamp>_harden_has_role.sql`
 
-### Out of scope (separate findings)
-- The other three findings shown in the security view (realtime broadcast, has_role enumeration, message insert binding) are related but distinct — happy to address them next in their own pass.
+### Verification
+- Existing RLS policies (all using `has_role(auth.uid(), ...)`) keep working unchanged.
+- A logged-in user calling `supabase.rpc('has_role', { _user_id: '<other-uuid>', _role: 'admin' })` now returns the result for *themselves*, not the targeted user — enumeration is closed.
+- Anonymous calls are rejected by the new `revoke from anon`.
 
-### Expected result
-- Security scan no longer reports `consults_anonymous_public_readable`.
-- Existing UX is preserved: visitors can still start an anonymous consult, chat, and later claim it after sign-in.
-- A new browser opening a copied consult URL will not be able to read the intake unless they sign in as the owner.
+### Out of scope
+The other open findings (`anon_consult_exposure`, `prescriptions_realtime_broadcast`, `consult_messages_anonymous_insert`, `edge_fn_idor`) are tracked separately and can be addressed in their own passes.
 
