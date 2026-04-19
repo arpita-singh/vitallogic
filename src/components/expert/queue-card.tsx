@@ -73,10 +73,14 @@ export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }
         </span>
       </div>
 
-      {(item.contactName || item.contactEmail) && (
+      {item.contactName || item.contactEmail ? (
         <div className="mt-3 rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
           <p className="text-foreground">{item.contactName || "Anonymous patient"}</p>
           {item.contactEmail && <p className="mt-0.5 break-all">{item.contactEmail}</p>}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl border border-dashed border-border bg-background/50 px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground/70">
+          No contact yet
         </div>
       )}
 

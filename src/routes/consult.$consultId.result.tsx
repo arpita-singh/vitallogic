@@ -41,21 +41,27 @@ function ResultPage() {
   const { consultId } = Route.useParams();
   const { user } = useAuth();
   const [rx, setRx] = useState<Rx | null>(null);
+  const [hasContact, setHasContact] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const { data, error } = await supabase
-        .from("prescriptions")
-        .select("id, status, draft, final, review_notes")
-        .eq("consult_id", consultId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [rxRes, consultRes] = await Promise.all([
+        supabase
+          .from("prescriptions")
+          .select("id, status, draft, final, review_notes")
+          .eq("consult_id", consultId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+      ]);
       if (cancelled) return;
-      if (error) console.error(error);
-      setRx((data as unknown as Rx) ?? null);
+      if (rxRes.error) console.error(rxRes.error);
+      setRx((rxRes.data as unknown as Rx) ?? null);
+      const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
+      setHasContact(Boolean(intake.contactEmail));
       setLoading(false);
     };
     void load();
@@ -155,7 +161,7 @@ function ResultPage() {
               : "A qualified practitioner is reviewing your draft recommendation. Most are turned around within a few hours."}
           </p>
 
-          {!user && <ContactCapture consultId={consultId} />}
+          {!user && !hasContact && <ContactCapture consultId={consultId} />}
 
           {!user && (
             <p className="mx-auto mt-4 max-w-sm text-xs text-muted-foreground">
