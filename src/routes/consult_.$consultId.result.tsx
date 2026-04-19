@@ -10,7 +10,7 @@ import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
-import { getConsult } from "@/lib/consult-server";
+import { getConsult, unlockEducation } from "@/lib/consult-server";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
