@@ -1,60 +1,94 @@
 
+I reviewed the relevant files plus the network trace, and the core issue is now clear:
 
-## Plan — View switcher (Patient ⇄ Expert) + clickable prescription notification
+1. The approved prescription does exist.
+2. The patient account shows nothing because the consult was never actually attached to the signed-in user (`consults.user_id` is still `null`).
+3. The header notification is using prescription-level data that dual-role users can read as experts, so it looks “ready” even when the patient-side ownership handoff failed.
+4. The claim flow is split across two different storage keys (`vl_consult_id` in `localStorage` and `pendingConsultId` in `sessionStorage`), so the redirect/claim logic is inconsistent.
 
-The user is an expert who is also a patient. After signing in, the header pushes them toward the Expert area and the gold dot on Account isn't actionable. Three fixes, all UI-only — no DB, no new routes.
+The network evidence confirms this:
+- approved prescription rows exist
+- the consult linked to that prescription still has `user_id = null`
+- account consult query returns `[]`, so the patient banner has nothing to show
 
-### Problem recap
-1. **No explicit "view mode" switch.** A user with `expert` role + their own consults has no way to toggle between *receiving* prescriptions (patient) and *prescribing* (expert).
-2. **Account dot is decorative.** It shows the count but clicking just opens `/account` — there's no jump to the actual ready prescription.
-3. **Login lands somewhere ambiguous.** Login redirects to `/account`, but the header visually emphasises the Expert link, so dual-role users feel "dropped into expert view".
+## Plan — Fix consult claiming + make patient prescription access actually actionable
 
-### Fixes
+### 1. Unify the anonymous-to-account claim flow
+Update `src/lib/claim-consult.ts` so there is one source of truth for a pending consult:
+- read both legacy keys for backward compatibility
+- clear both after a successful claim
+- expose one helper used everywhere
 
-**1. View-mode toggle in the header (dual-role users only)** — `src/components/site-header.tsx`
-- Add a small segmented control next to the Account button, visible only when `isExpert && isAuthenticated`:
-  ```
-  [ Patient | Expert ]
-  ```
-- State stored in `localStorage` key `vl_view_mode` (`"patient" | "expert"`), default `"patient"` so signing in always lands a dual-role user in their patient view (matches the user's mental model: "I just signed in to see my prescription").
-- Clicking **Patient** → navigates to `/account`, hides the Expert link, shows the Account+ready dot prominently.
-- Clicking **Expert** → navigates to `/expert?filter=pending`, hides patient artefacts (ready dot), shows the queue dot.
-- The toggle persists across reloads. Single-role users (patient-only or expert-only) never see it.
-- Mobile menu gets the same toggle as two large buttons at the top of the auth section.
+Then update:
+- `src/routes/consult.tsx`
+- `src/routes/consult_.$consultId.result.tsx`
+to use the same helper instead of writing different keys in different places.
 
-**2. Make the prescription notification actionable** — `src/components/site-header.tsx` + `src/routes/_authenticated/account.tsx`
-- The header dot stays on the Account button (count only).
-- Add `?ready=1` when the dot is clicked → `/account?ready=1`. The account page already renders the gold "Your prescription is ready" banner; when `ready=1` is present, scroll-into-view + brief gold pulse on that banner so it's unmissable.
-- If exactly **one** prescription is ready, clicking the dot deep-links straight to `/consult/{id}/result` instead of `/account`. We already fetch the count via RLS — extend the query to also grab the most recent ready consult id when count === 1, and store both in state.
+### 2. Make auth redirect to the claimed consult before anything else
+Update:
+- `src/lib/auth.tsx`
+- `src/routes/login.tsx`
+- `src/routes/signup.tsx`
+- `src/routes/auth.callback.tsx`
 
-**3. Default post-login destination respects view mode** — `src/lib/auth.tsx` + `src/routes/login.tsx` + `src/routes/auth.callback.tsx`
-- After successful sign-in, read `vl_view_mode` from localStorage:
-  - `"expert"` *and* user has expert role → navigate to `/expert?filter=pending`.
-  - Otherwise → `/account` (current behaviour, but now explicit).
-- A `?redirect=` search param still wins over both (so the "Sign in to view your prescription" deep-link from the result page keeps working).
-- First-time login (no stored mode) defaults to `"patient"` view → lands on `/account`.
+So after sign-in/sign-up/OAuth:
+- if a consult was successfully claimed, go straight to `/consult/$consultId/result`
+- otherwise fall back to the existing patient/expert landing logic
 
-### Files
+This prevents users from signing in and then landing somewhere unrelated while their prescription is still hidden.
 
-**Modified only — no new files, no DB, no migrations:**
-- `src/components/site-header.tsx` — view-mode toggle (desktop + mobile), conditional Expert/Account rendering based on mode, smarter notification dot link (deep-link when count === 1), extend the ready-prescriptions query to also return the latest ready consult id.
-- `src/routes/_authenticated/account.tsx` — read `?ready=1` search param, scroll the gold banner into view + add a one-shot `animate-pulse` highlight when present.
-- `src/lib/auth.tsx` — small helper `getPreferredLandingPath(roles)` that reads `vl_view_mode` and returns `/expert?filter=pending` or `/account`. Used by `signIn`/`signUp`.
-- `src/routes/login.tsx` — use the helper for post-signin navigation when no `?redirect=` is provided.
-- `src/routes/auth.callback.tsx` — same helper for the OAuth landing.
+### 3. Add a self-healing claim attempt on the result page
+Update `src/routes/consult_.$consultId.result.tsx` so that when a signed-in user lands on a consult result page and that consult is still unclaimed:
+- if it matches the remembered pending consult, attempt to claim it immediately
+- only show the auth gate if that recovery path fails
 
-### Visual sketch (desktop header, dual-role user)
+This makes the result page resilient even if the redirect sequence is imperfect.
 
-```text
-Logo  ...nav...        [Patient|Expert]   Account ●3
-                       └ toggle ─┘        └ clickable dot
-```
+### 4. Fix the header notification to use patient-owned consults, not expert-readable prescriptions
+Update `src/components/site-header.tsx`:
+- in patient view, compute ready items from the user’s consults (or unique consult IDs), not raw approved prescription rows
+- dedupe by consult so one consult with multiple approved prescription rows does not break the “single ready prescription” deep link
+- keep the Expert queue logic separate from patient-ready logic
 
-When the user clicks `Expert` the toggle stores `expert`, the patient dot disappears, and a gold queue badge appears on a re-shown `Expert` link. When they click `Patient`, the Expert link hides and Account + ready dot return.
+This will stop false/broken notification states for dual-role users.
 
-### Out of scope
-- No "expert can act as a patient on their own consults" workflow change — RLS already permits both; this is purely a navigation/affordance fix.
-- No persistence of view mode in the database; localStorage is enough for a per-device preference.
-- No redesign of the Expert dashboard or Account page beyond the small ready-banner highlight.
-- No `viewed_at` tracking (still a deferred follow-up).
+### 5. Make the header action explicitly actionable
+Also in `src/components/site-header.tsx`:
+- keep `Account` as a stable link to `/account`
+- add a distinct prescription-ready action/pill/badge beside it when there is something ready
+- if exactly one ready consult exists, link directly to that result page
+- if multiple exist, link to the ready banner on account
 
+This removes the current ambiguity where “Account” and the notification are bundled into one weak action.
+
+### 6. Strengthen the account page ready banner
+Update `src/routes/_authenticated/account.tsx`:
+- ensure the banner is driven by patient-owned consults only
+- preserve the highlight/scroll behavior for `?ready=1`
+- show a clear empty state if the user is authenticated but nothing has been claimed yet
+- optionally add a small fallback notice if a pending consult is detected but not yet attached, so the UI doesn’t feel broken
+
+## Files to modify
+- `src/lib/claim-consult.ts`
+- `src/lib/auth.tsx`
+- `src/routes/consult.tsx`
+- `src/routes/consult_.$consultId.result.tsx`
+- `src/routes/login.tsx`
+- `src/routes/signup.tsx`
+- `src/routes/auth.callback.tsx`
+- `src/components/site-header.tsx`
+- `src/routes/_authenticated/account.tsx`
+
+## No backend schema changes needed
+This looks like a flow/ownership bug, not a table-design problem:
+- the prescription exists
+- the patient can’t see it because the consult was never claimed
+- current RLS is doing what it should
+
+## Expected result after this fix
+For a dual-role user:
+- signing in after a consult claims the consult reliably
+- patient view shows the consult on account
+- the ready banner appears correctly
+- the ready notification becomes a real action
+- clicking it opens the prescription instead of sending the user into a dead end
