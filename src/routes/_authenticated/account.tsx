@@ -247,35 +247,40 @@ function AccountPage() {
             </div>
           ) : (
             <ul className="space-y-2">
-              {consults.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    to="/consult/$consultId/result"
-                    params={{ consultId: c.id }}
-                    className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 transition-colors hover:border-gold/50"
-                  >
-                    <div>
-                      <p className="text-sm text-foreground">
-                        {new Date(c.created_at).toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Consult #{c.id.slice(0, 8)}
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full border px-3 py-1 text-xs uppercase tracking-wider ${
-                        STATUS_STYLES[c.status] ?? STATUS_STYLES.draft
-                      }`}
+              {consults.map((c) => {
+                const isApproved = (c.prescriptions ?? []).some((p) => p.status === "approved");
+                return (
+                  <li key={c.id}>
+                    <Link
+                      to={isApproved ? "/consult/$consultId/result" : "/consult/$consultId"}
+                      params={{ consultId: c.id }}
+                      className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 transition-colors hover:border-gold/50"
                     >
-                      {STATUS_LABELS[c.status] ?? c.status}
-                    </span>
-                  </Link>
-                </li>
-              ))}
+                      <div>
+                        <p className="text-sm text-foreground">
+                          {new Date(c.created_at).toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {isApproved ? "View prescription" : `Consult #${c.id.slice(0, 8)}`}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs uppercase tracking-wider ${
+                          isApproved
+                            ? "border-gold/40 bg-gold/10 text-gold"
+                            : (STATUS_STYLES[c.status] ?? STATUS_STYLES.draft)
+                        }`}
+                      >
+                        {isApproved ? "Ready" : (STATUS_LABELS[c.status] ?? c.status)}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
