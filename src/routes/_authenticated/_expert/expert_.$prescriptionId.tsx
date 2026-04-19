@@ -495,6 +495,17 @@ function ReviewPage() {
           </div>
         )}
       </div>
+
+      <PrescriptionReviewModal
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        data={edit}
+        attachedProducts={attachedProducts}
+        reviewerNotes={notes}
+        patientName={consult.intake.contactName ?? authorName}
+        onConfirm={handleApprove}
+        busy={busy}
+      />
     </Section>
   );
 }
