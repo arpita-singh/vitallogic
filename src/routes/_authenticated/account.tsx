@@ -203,6 +203,25 @@ function AccountPage() {
           );
         })()}
 
+        {/* Pending-but-unattached fallback notice */}
+        {pendingOrphan && (
+          <div className="mt-6 rounded-2xl border border-violet/40 bg-violet/5 p-5">
+            <p className="text-sm text-foreground">
+              We found a recent consult that isn't linked to this account yet.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open it directly to attach it to your account, or sign in with the email you used originally.
+            </p>
+            <Link
+              to="/consult/$consultId/result"
+              params={{ consultId: pendingOrphan }}
+              className="mt-3 inline-flex rounded-full border border-violet/60 px-4 py-2 text-xs uppercase tracking-wider text-violet hover:bg-violet/10"
+            >
+              Open consult
+            </Link>
+          </div>
+        )}
+
         {/* Consults */}
         <div className="mt-10">
           <div className="mb-3 flex items-baseline justify-between">
