@@ -1,64 +1,53 @@
 
 
-## Scope check
+## What's actually happening
 
-`src/lib/consult-server.ts` is NOT fully unused — it still exports things that are actively imported:
+The user IS holding a session in localStorage that the client thinks is valid, but the auth server has lost/revoked it. Auth logs since 14:37 UTC show dozens of `403 "session id (d4712b33-...) doesn't exist"` errors against `/user`. The client never notices because:
 
-| Export | Used by |
-|---|---|
-| `startConsult` (server fn) | `src/routes/consult.tsx` (creates every new consult) |
-| `Intake` type | `src/routes/consult.tsx`, `src/components/consult/intake-stepper.tsx`, `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` |
-| `getConsult`, `saveConsultContact`, `claimConsult`, `unlockEducation` | nothing — already replaced by `consult-access` edge function |
+- `supabase.auth.getSession()` returns the cached session from localStorage without revalidating.
+- `auth.tsx` only sets `user = null` when an `onAuthStateChange` event fires — and a server-side session deletion does not always trigger one if the access token is still within its 1-hour window.
+- The result page sees `user` truthy → calls `readConsult` → edge function calls `admin.auth.getUser(stale_token)` → gets no user → returns 401 → page shows "Sign in to view" gate, but the user IS signed in, causing the loop visible in the video. Same story for `claimSpecificConsult` and `claimPendingConsult`.
 
-`src/lib/consult-schema.ts` is only imported by `consult-server.ts` itself — once `startConsult` migrates, it can also go.
+So the symptom — "I'm signed in but can't view my prescription" — is exactly correct.
 
-So "delete the file" actually means: **finish the edge-function migration for `start` first, then delete both files cleanly.**
+## The fix
 
-## Plan
+**1. Detect stale sessions on the client and force a clean sign-out.**
 
-1. **Add `start` action to the `consult-access` edge function**
-   - Accept `{ action: "start", intake }`.
-   - Validate `intake` server-side using the same shape as the old zod schema (mirrored in Deno, like the other edge functions already do).
-   - If the caller has a verified JWT → set `user_id`, no anon token.
-   - Otherwise → mint a 32-byte base64url anon token, store SHA-256 hash, return raw token to caller exactly once.
-   - Insert the consult row + seed system message with the intake summary (port `intakeSummary` helper).
-   - Return `{ consultId, anonToken? }`.
+In `src/lib/auth.tsx`, after `getSession()` returns a session on initial load, call `supabase.auth.getUser()` once to ask the server to validate the access token. If the server returns no user (session revoked / expired refresh), call `supabase.auth.signOut({ scope: "local" })` to clear localStorage so the UI correctly reflects "signed out", then redirect to login if needed.
 
-2. **Add `startConsultRequest` to `src/lib/consult-access.ts`**
-   - Thin wrapper around `supabase.functions.invoke("consult-access", { body: { action: "start", intake } })`.
-   - Returns `{ consultId, anonToken? }`.
+**2. Recover gracefully on the result page when the edge function returns 401 despite `user` being non-null.**
 
-3. **Move the `Intake` type to a client-safe module**
-   - Create `src/lib/consult-types.ts` exporting just the `Intake` type (no zod, no server imports).
-   - Update the three importers:
-     - `src/routes/consult.tsx`
-     - `src/components/consult/intake-stepper.tsx`
-     - `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`
+In `src/routes/consult_.$consultId.result.tsx`, when `readConsult` throws `Unauthorized` AND `user` is truthy, treat it as a stale-session signal: call `supabase.auth.signOut({ scope: "local" })`, then re-render. This stops the claim loop and surfaces the proper "Sign in to view your prescription" gate, where the user can actually re-authenticate.
 
-4. **Switch `src/routes/consult.tsx` to the edge function**
-   - Replace `startConsult({ data: { intake, userId } })` with `startConsultRequest(intake)`.
-   - Drop the `userId` argument (the edge function derives it from the JWT — never trust client-supplied user ids, same rule as everywhere else).
+**3. Stop the toast spam from `claimSpecificConsult`.**
 
-5. **Delete the now-orphan files**
-   - `src/lib/consult-server.ts`
-   - `src/lib/consult-schema.ts` (only consumer was consult-server)
-   - Leave `supabase/functions/consult-chat/index.ts`'s "Keep these in sync" comment intact — the caps still mirror what's now defined in the edge function.
+The `useRef` guard already prevents the React loop from re-firing, but the original error toast from a 401 should be silenced (it's an expected failure mode now — only log it at warn level, no toast).
+
+**4. Same treatment in `account.tsx` for `claimPendingConsult` 401s.**
+
+Don't surface error toasts when the failure is a stale-session 401; trigger the same local sign-out and reload.
+
+## Why this is correct, not a workaround
+
+A 401 from `admin.auth.getUser(token)` definitively means the client's stored token is no longer valid. The only correct response is to clear the stale session locally so the UI matches reality. The server has already invalidated this session — there is nothing to "fix" server-side. The user can then sign back in cleanly and the existing claim/result flow takes over (verified to work in the previous QA pass).
+
+## Files to change
+
+- `src/lib/auth.tsx` — add a one-time server-side validation on init; sign out locally if stale.
+- `src/routes/consult_.$consultId.result.tsx` — handle 401 from `readConsult` as stale-session.
+- `src/routes/_authenticated/account.tsx` — same handling for `claimPendingConsult` 401.
+- `src/lib/claim-consult.ts` — return a structured result distinguishing "stale session" from "ownership denied" so callers can react correctly.
+
+## Out of scope
+
+- No edge function changes. No database/RLS changes. The `consult-access` function is correct.
+- No change to the anonymous-token flow. That's already verified working.
 
 ## Verification
 
-- Start a fresh consult while signed out → consult created, anon token persisted via `rememberPendingConsult`, redirect to `/consult/$consultId` works.
-- Start a fresh consult while signed in → consult created, attributed to user, no anon token returned.
-- Existing consult result page still loads (uses `readConsult`, unchanged).
-- TypeScript build passes (no dangling imports of `@/lib/consult-server` or `@/lib/consult-schema`).
-
-## Files
-
-- Edit: `supabase/functions/consult-access/index.ts` (add `start` action + intake validator + system-message seeding)
-- Edit: `src/lib/consult-access.ts` (add `startConsultRequest`)
-- Create: `src/lib/consult-types.ts` (`Intake` type only)
-- Edit: `src/routes/consult.tsx` (swap import + call)
-- Edit: `src/components/consult/intake-stepper.tsx` (swap `Intake` import)
-- Edit: `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (swap `Intake` import)
-- Delete: `src/lib/consult-server.ts`
-- Delete: `src/lib/consult-schema.ts`
+After implementing, in the same browser tab the user is currently in:
+1. The page should auto-detect the dead session, sign them out locally, and show the "Sign in to view your prescription" gate within ~1s of load (no toast spam).
+2. After signing back in, `readConsult` succeeds, the prescription page renders, no claim loop.
+3. Auth logs should stop showing the repeating `session_not_found` 403s for the d4712b33/b0e3085e sessions.
 
