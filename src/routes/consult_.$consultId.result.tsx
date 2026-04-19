@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, Clock, ShieldAlert, CheckCircle2, BookOpen, Compass, Heart, Sun, LogIn, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Section, SectionHeader } from "@/components/section";
@@ -10,7 +10,7 @@ import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
-import { getConsult, unlockEducation } from "@/lib/consult-server";
+import { readConsult, unlockEducationRequest } from "@/lib/consult-access";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
