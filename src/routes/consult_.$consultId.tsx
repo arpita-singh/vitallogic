@@ -79,9 +79,12 @@ function ConsultChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
 
-  // Send first AI turn automatically once loaded with no assistant messages yet
+  // Send first AI turn automatically once loaded with no assistant messages yet.
+  // Skip entirely if a prescription already exists — the user shouldn't be
+  // dragged back into a chat loop after their consult was processed.
   useEffect(() => {
     if (!loaded || streaming) return;
+    if (hasApprovedRx || hasPendingRx) return;
     const hasAssistant = messages.some((m) => m.role === "assistant");
     const hasUser = messages.some((m) => m.role === "user");
     if (!hasAssistant && !hasUser && intakeSummary) {
@@ -89,7 +92,20 @@ function ConsultChatPage() {
       void send("Hello — I just finished the intake. Could you take a look and ask me your first question?", true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, intakeSummary]);
+  }, [loaded, intakeSummary, hasApprovedRx, hasPendingRx]);
+
+  // Auto-redirect to the result page when an approved prescription exists.
+  // This breaks the "I keep landing in the chatbot" loop for patients
+  // returning to a consult that's already been finalised.
+  useEffect(() => {
+    if (loaded && hasApprovedRx) {
+      void navigate({
+        to: "/consult/$consultId/result",
+        params: { consultId },
+        replace: true,
+      });
+    }
+  }, [loaded, hasApprovedRx, consultId, navigate]);
 
   const send = async (text: string, hidden = false) => {
     if (!text.trim() || streaming) return;
