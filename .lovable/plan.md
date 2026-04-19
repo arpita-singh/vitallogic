@@ -1,75 +1,103 @@
 
-The user wants two changes:
 
-1. **Remove "Amazon of health" wording** — find any usage in the codebase (likely in copy somewhere) and replace with "your natural health hub".
-2. **Convert the uploaded lotus logo image to SVG** and use it as the Vital Logic brand logo across the site (currently the logo is a `Sparkles` icon inside a gradient circle in `site-header.tsx` and `site-footer.tsx`).
+## Plan — Vital Logic v2.0 (Pillars 3 & 4)
 
-Let me explore to confirm scope before planning.
-<lov-tool-use id="toolu_vrtx_01AY58rnvFXpq4NoAFCiRmuy" name="code--search_files" integration-id="code" data="{\"query\": \"Amazon\", \"include_patterns\": \"*.tsx,*.ts,*.md,*.css\"}">
-</lov-tool-use>
+Building the marketplace foundation + premium education unlock. Four steps, sequenced so backend exists before UI consumes it.
 
-<lov-tool-use id="toolu_vrtx_015MPXgdpeU2qWYar5NXFZ2y" name="code--search_files" integration-id="code" data="{\"query\": \"Sparkles\", \"include_patterns\": \"*.tsx\"}">
-</lov-tool-use>
+---
 
-<lov-tool-use id="toolu_vrtx_016vtxj2nUq9eYpEvBTkGoNy" name="code--search_files" integration-id="code" data="{\"query\": \"Amazon\", \"include_patterns\": \"*.tsx,*.ts,*.md\"}">
-</lov-tool-use>
+### Step 1 — Database (migration)
 
-<lov-tool-use id="toolu_vrtx_014yZ4WTaLe1uP3kcLkmq9Lr" name="code--search_files" integration-id="code" data="{\"query\": \"amazon of health\", \"case_sensitive\": false}">
-</lov-tool-use>
+Two new tables with RLS using existing `has_role()` + `user_roles` pattern.
 
-<lov-tool-use id="toolu_vrtx_01Lof2urC7GmQMCMVwwdQiCL" name="code--search_files" integration-id="code" data="{\"query\": \"Sparkles\", \"include_patterns\": \"*.tsx\"}">
-</lov-tool-use>
+**`certified_materia_medica`** (marketplace inventory)
+- `id` uuid PK, `product_name` text, `category` text (free-form for now — Ayurveda / Naturopathy / Indigenous / etc.), `aust_l_number` text, `price` numeric(10,2), `stock_status` boolean default true, `vendor_name` text, `description` text (small extra — needed for product cards), `created_at`, `updated_at`.
+- RLS: SELECT for everyone (public catalog); INSERT/UPDATE/DELETE only for `admin` or `expert` (so experts can manage their own catalog if needed; admins always).
+- Seed ~6 demo products covering all three categories so the UI has something to show immediately.
 
-<lov-tool-use id="toolu_vrtx_01XQCzVq9b7vcwJeFR414t99" name="code--view" integration-id="code" data="{\"file_path\": \"src/routes/index.tsx\", \"lines\": \"1-90\"}">
-</lov-tool-use>
+**`user_purchases`** (payment ledger placeholder)
+- `id` uuid PK, `user_id` uuid not null, `consult_id` uuid (nullable — education unlock can be per-consult or account-wide), `has_unlocked_education` boolean default false, `purchased_medications` jsonb default `'[]'`, `created_at`, `updated_at`.
+- RLS: owner-only SELECT/INSERT/UPDATE (`auth.uid() = user_id`); experts/admins can SELECT for support.
 
-<lov-tool-use id="toolu_vrtx_017vTuyyCKWEXARbe3nBDvXS" name="code--view" integration-id="code" data="{\"file_path\": \"user-uploads://image-7.png\"}">
-<lov-image url="https://storage.googleapis.com/gpt-engineer-file-uploads/3f58001e-f092-4c1a-8c5f-22db738b3ff3-user-uploads://image-7.png?Expires=1776593142&GoogleAccessId=go-api-on-aws%40gpt-engineer-390607.iam.gserviceaccount.com&Signature=YUigNsWcPfFvmezarx4BeLVbJSJgV95o7iirpAIGjUDBabU15DFdP4sCa4dseR%2BLoBQRy9WTE5EeWmoFa2o5ZSMTAVLxGHiahEovc0J7qL%2FilMI0KhJHM6y4ZvaurRM4DrFKB8k1MUd4LiD87nJ5ziMCqPs6g%2BgeBa%2F58ti0O5uKY1d4yJgCHJyUaX8NvVh46VMQxH6pcBBh%2FZZrPFDAnEiqKl%2F4dD%2FZWqIHL69CS6xzAq8ot1BUMsjcDSZT2az4HIIhqDgeqFcw1%2BnnDeVxP0EUowVphA07U4djnzjdrw0LWZG7u%2FqjGhHC1SIgSIChuKBMetLaX3%2Br%2FepkyoyIHA%3D%3D" mimeType="image/png"/></lov-tool-use>
+**Schema-level addition to `prescriptions`:** add `attached_products` jsonb column (default `'[]'`) on the existing `prescriptions` table to hold the array of selected marketplace products `{product_id, product_name, dosage_notes}`. This is the cleanest way to attach products without disturbing the existing `draft`/`final` JSON shape.
 
-<lov-tool-use id="toolu_vrtx_01Wq4CT7vea6KzsYwLk2b8PY" name="code--list_dir" integration-id="code" data="{\"dir_path\": \"src/assets\"}">
-</lov-tool-use>
-I have what I need. Let me present a focused plan.
+---
 
-<lov-plan>
+### Step 2 — Expert UI: product attachment
 
-## Plan
+File: `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (note the `_` suffix — the renamed file from earlier this session).
 
-Two changes — copy update + new SVG logo.
+- Add a new "Attach marketplace products" panel inside the editor card, above the existing approve/reject buttons.
+- New component `src/components/expert/product-picker.tsx`:
+  - shadcn `Command` + `Popover` combobox, pulls from `certified_materia_medica` where `stock_status = true`.
+  - Searchable by `product_name`, grouped by `category` (CommandGroup per category).
+  - Each result shows: product name, AUST-L number badge, price, vendor (small/muted).
+  - Selected products render as chip rows below with: name, optional dosage-notes input, remove button.
+- On approve, the chosen products are written to `prescriptions.attached_products` AND a new audit row is inserted into `prescription_audit` with `action: "attach_products"` and `diff: { added: [...], removed: [...] }` so the existing audit trail captures the change. The existing approve flow is preserved verbatim — products are an additive sidecar.
+- `audit-trail.tsx` already renders unknown actions generically; no change needed there.
 
-### 1. Replace "The Amazon of Health" tagline
+---
 
-Update `src/routes/index.tsx`:
-- Hero `<h1>` (lines 51-55): change "The Amazon / of Health" → "Your Natural / Health Hub" (keeping the gold gradient on "Natural").
-- `head()` meta titles/descriptions (lines 9, 15): swap to "Vital Logic — Your Natural Health Hub".
+### Step 3 — Patient result UI
 
-Update `src/routes/__root.tsx` meta tags (lines 45, 54, 55): same swap.
+File: `src/routes/consult_.$consultId.result.tsx`.
 
-No other files reference "Amazon".
+Two new sections rendered only when `rx.status === "approved"`:
 
-### 2. Create a custom SVG lotus logo
+**Section 1 — Medication cards** (above the existing rationale list, or directly under the "Approved" header — leaning under the summary so the prescribed products feel like the primary deliverable).
+- New component `src/components/consult/product-card.tsx`.
+- Grid: 1 col mobile, 2 col `md:`. Each card uses our surface tokens (`bg-surface`, `border-border`, gold accent on category badge).
+- Card content: category chip, product name (display font), AUST-L line (`text-xs text-muted-foreground`), vendor, price in gold, expert's dosage notes if present, primary "Purchase medication" button (placeholder — `onClick` shows a `sonner` toast "Checkout coming soon").
+- If `attached_products` is empty, the section is omitted.
 
-Create `src/assets/vital-logic-logo.svg` — a hand-built, scalable SVG inspired by the uploaded reference:
-- **Center**: a luminous gold sphere (radial gradient, gold core → warm amber edge).
-- **Lotus petals**: ~9 stylized petals arranged symmetrically (4 per side + 1 top center), drawn as SVG paths with violet stroke and a translucent violet fill.
-- **Circuit-board accents**: thin polylines and small dots traced along each petal (the "tech-meets-nature" motif).
-- **Glow**: SVG `<filter>` with `feGaussianBlur` for the violet outer glow + gold inner glow.
-- **Color tokens** (matched to existing palette): violet `#8B5CF6`, gold `#F4C151`, deep background-friendly (transparent bg so it works on dark surfaces).
-- Designed at `viewBox="0 0 200 160"` so it scales cleanly down to a 32×32 header mark.
+**Section 2 — "Unlock Your Owner's Manual"** (below the rationale + safety + citations block).
+- Full-width premium card. Background: subtle gold→violet gradient (`bg-gradient-to-br from-gold/10 via-background to-violet/10`), thicker gold border (`border-gold/40`), large display headline.
+- Copy: "Unlock your Owner's Manual" + subtitle "A custom preventative-care guide built from your consult — your unique constitution, mind-body patterns, and the daily habits that keep you in flow."
+- Visual flourish: small lotus mark + 3 micro-bullets ("Your unique design", "Mind-body connection", "Preventative habits").
+- Primary CTA: "Unlock now — $X" (placeholder price). On click: insert/upsert into `user_purchases` with `has_unlocked_education = true` (placeholder for real Stripe), then navigate to `/owner-manual`. Show a toast confirmation.
+- If the user already has `has_unlocked_education = true`, swap CTA to "Open your Owner's Manual" linking to `/owner-manual`.
 
-I will NOT bake in the "VITAL LOGIC / HEALTH MARKETPLACE" wordmark — the wordmark already exists as text next to the logo in the header/footer. The SVG is the symbol only.
+---
 
-### 3. Wire the SVG into the brand
+### Step 4 — Owner's Manual route
 
-Replace the `Sparkles`-in-gradient-circle placeholder in:
-- `src/components/site-header.tsx` (lines 60-63)
-- `src/components/site-footer.tsx` (lines 10-14)
+New file: `src/routes/_authenticated/owner-manual.tsx` (sits under existing `_authenticated` guard so unauth users bounce to login).
 
-Import via `import logo from "@/assets/vital-logic-logo.svg"` and render as `<img src={logo} alt="Vital Logic" className="h-8 w-8" />`. Drop the now-unused `Sparkles` import from these two files.
+- On mount, query `user_purchases` for current user, find max `has_unlocked_education`.
+- **Locked state**: centered card with a faded lotus icon, copy "Your Owner's Manual is locked. Complete a consult and unlock to receive your personalised preventative-care guide.", primary button → `/consult`, secondary → back home.
+- **Unlocked state**: hero with user's display_name from profile ("Your Owner's Manual, {name}"), then 3 sections rendered as styled cards in a single column with generous spacing:
+  1. **Your Unique Design** — placeholder paragraphs about constitutional type.
+  2. **Mind-Body Connection** — placeholder paragraphs about stress/sleep/digestion patterns.
+  3. **Preventative Habits** — placeholder daily/weekly/seasonal practice list.
+- Each section: gold uppercase eyebrow, display-font heading, body copy in `text-foreground/90`, divider between sections.
+- Add the route to the header user menu (small addition to `site-header.tsx`'s authenticated dropdown if there is one — otherwise skip; will check during implementation).
 
-The hero already uses `heroLotus` (the existing photographic asset) — I'll leave that untouched. The new SVG is purely the brand mark.
+---
 
-### Constraints
-- No backend/DB/auth changes.
-- No new dependencies (raw SVG, no icon libs).
-- Don't touch the hero image or any other route.
+### Cross-cutting
+
+- All new tables get `update_updated_at_column()` trigger using the existing function.
+- Realtime is NOT enabled on the new tables (not needed — patient page already reloads on prescription updates, which now include `attached_products`).
+- Toasts via existing `sonner` setup.
+- No new npm dependencies; combobox uses already-installed shadcn `Command` + `Popover`.
+- Visual language stays "Sunny Goth": violet `#7C3AED`, gold `#F4C151`, surface tokens already in `styles.css`.
+- Audit trail integrity: every approve that includes products writes BOTH the existing approval audit row AND a new `attach_products` row, in a single transaction client-side (sequential inserts; if the second fails the approval still stands but a console error surfaces — acceptable for placeholder phase).
+
+### Files touched
+**New:**
+- migration SQL (2 tables + `prescriptions.attached_products` column + RLS + seed)
+- `src/components/expert/product-picker.tsx`
+- `src/components/consult/product-card.tsx`
+- `src/routes/_authenticated/owner-manual.tsx`
+
+**Modified:**
+- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`
+- `src/routes/consult_.$consultId.result.tsx`
+- `src/components/site-header.tsx` (only if an auth menu exists — small link addition)
+
+### Out of scope (explicit)
+- Real Stripe checkout — placeholder buttons + toasts only.
+- Actual AI-generated owner's-manual content — placeholders only.
+- Inventory management UI for admins — not requested.
+- Email notifications on purchase — not requested.
 
