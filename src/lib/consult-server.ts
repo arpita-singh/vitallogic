@@ -59,18 +59,22 @@ function intakeSummary(intake: Intake): string {
 }
 
 /**
- * Start a consult. Works for anonymous (no auth) and authenticated users.
- * We use the admin client and explicitly set user_id from the optional auth header.
+ * Start a consult. Works for anonymous AND signed-in users.
+ *
+ * Strategy: always insert with user_id = NULL (the public anon-insert RLS
+ * policy allows this for everyone). If the caller is signed in, verify their
+ * bearer token server-side and transfer ownership immediately. We don't trust
+ * the userId field from client input — it's re-derived from the JWT.
  */
 export const startConsult = createServerFn({ method: "POST" })
   .inputValidator((data: { intake: Intake; userId?: string | null }) => data)
   .handler(async ({ data }) => {
-    const { intake, userId } = data;
+    const { intake } = data;
     const supabase = getSupabaseForRequest();
 
     const { data: consult, error } = await supabase
       .from("consults")
-      .insert({ intake: intake as never, user_id: userId ?? null, status: "draft" })
+      .insert({ intake: intake as never, user_id: null, status: "draft" })
       .select("id")
       .maybeSingle();
 
@@ -86,6 +90,23 @@ export const startConsult = createServerFn({ method: "POST" })
       content: intakeSummary(intake),
     });
     if (msgErr) console.error("seed system message failed", msgErr);
+
+    // Auto-claim for signed-in callers (verify token rather than trusting input).
+    const request = getRequest();
+    const authHeader = request?.headers?.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice("Bearer ".length);
+      const { data: authData } = await supabase.auth.getClaims(token);
+      const verifiedUserId = authData?.claims?.sub;
+      if (verifiedUserId) {
+        const { error: claimErr } = await supabase
+          .from("consults")
+          .update({ user_id: verifiedUserId })
+          .eq("id", consult.id)
+          .is("user_id", null);
+        if (claimErr) console.error("auto-claim consult failed", claimErr);
+      }
+    }
 
     return { consultId: consult.id as string };
   });
