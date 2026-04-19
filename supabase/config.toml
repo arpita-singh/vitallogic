@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.generate-prescription]
 verify_jwt = false
+
+[functions.consult-access]
+verify_jwt = false
