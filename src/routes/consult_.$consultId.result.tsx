@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Sparkles, Clock, ShieldAlert, CheckCircle2, BookOpen, Compass, Heart, Sun } from "lucide-react";
+import { Sparkles, Clock, ShieldAlert, CheckCircle2, BookOpen, Compass, Heart, Sun, LogIn, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Section, SectionHeader } from "@/components/section";
 import { ModalityBadge, type Modality } from "@/components/consult/modality-badge";
@@ -9,6 +9,7 @@ import { ProductCard } from "@/components/consult/product-card";
 import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { rememberPendingConsult } from "@/lib/claim-consult";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
