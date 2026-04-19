@@ -1,54 +1,43 @@
 
 
-## Fix — `consults_anon_token_no_select_policy`
+## Fix — `prescriptions_realtime_rls`
 
-### Analysis
-The scanner notes anonymous users can `INSERT` into `consults`/`consult_messages` but have no `SELECT` policy to read them back. The codebase already routes all anonymous reads through the `getConsult` server function (in `src/lib/consult-server.ts`), which uses `supabaseAdmin` (bypasses RLS) and verifies ownership via `anon_token_hash`. So the "missing read policy" is intentional — the safe path is server-mediated, not direct PostgREST.
+### Context
+In the previous pass we already removed `prescriptions` from the `supabase_realtime` publication to close `prescriptions_realtime_no_rls_channel_auth`. The scanner is now flagging a related-but-distinct concern: even if Realtime were re-enabled, row-level filtering would not be guaranteed without (a) the table being in the publication with `REPLICA IDENTITY FULL`, and (b) SELECT RLS policies that correctly scope rows per subscriber.
 
-The real risk the scanner is hinting at: the **INSERT policies are still open to anonymous clients**, even though our app exclusively writes through server functions (`startConsult`) using the service role. That leaves a redundant attack surface — an attacker could `POST /rest/v1/consults` directly, inserting arbitrary intake JSON with their own `anon_token_hash`. Same for `consult_messages` (it has no anon insert policy today, good — but the `consults` one is open).
+Let me verify the current state before deciding.
 
-### Fix — close the unused anonymous write path
-
-Since 100% of anonymous writes go through `startConsult` (service role), we can safely **revoke the anonymous INSERT path on `consults`**. Authenticated owner inserts stay supported.
-
-**Migration:**
+### Verification step (during implementation)
+Run a read-only check via `supabase--read_query`:
 ```sql
--- Drop the permissive anon-or-owner insert policy
-drop policy if exists "Consults: anyone can insert" on public.consults;
-
--- Replace with an authenticated-owner-only insert policy.
--- Anonymous consult creation now goes exclusively through the
--- startConsult server function (service role), which sets
--- anon_token_hash and bypasses RLS.
-create policy "Consults: authenticated owner can insert"
-on public.consults
-for insert
-to authenticated
-with check (auth.uid() = user_id);
+select schemaname, tablename
+from pg_publication_tables
+where pubname = 'supabase_realtime' and tablename = 'prescriptions';
 ```
+- **If the row is absent** (expected) → `prescriptions` is not broadcast at all. Mark the finding as fixed with that explanation. No DB change needed.
+- **If the row is present** → drop it from the publication (the app fetches on demand; no UX regression):
+  ```sql
+  alter publication supabase_realtime drop table public.prescriptions;
+  ```
 
-`consult_messages` already has no anon INSERT/SELECT policy, so anonymous direct writes/reads are already blocked there — nothing to change.
+Either way, the existing `prescriptions` SELECT policies are already correctly scoped per subscriber:
+- `Prescriptions: owner sees approved` — owner only sees their own row, only when `status = 'approved'`.
+- `Prescriptions: experts can select all` — gated by `has_role`.
 
-### Why not add anon SELECT policies instead?
-Two reasons:
-1. **No safe RLS-side token verification.** Postgres RLS can't read a custom header to compare against `anon_token_hash` without leaking timing/format details, and Supabase JWT claims for anon don't carry our token. Doing it in RLS would require either a SECURITY DEFINER RPC (same as our server fn) or storing the raw token in a JWT (worse).
-2. **Server-mediated reads are already in place** (`getConsult`, `saveConsultContact`, `claimConsult`) and verify ownership properly with constant-time-ish hash comparison. Adding a parallel RLS path duplicates surface area for no UX gain.
+So if Realtime is ever re-enabled in the future, row-level filtering will already be enforced (Supabase Realtime runs SELECT RLS as the subscriber for `postgres_changes`).
 
-### Mark the finding
-After the migration lands, mark `consults_anon_token_no_select_policy` as fixed with the explanation: "Anonymous reads/writes are intentionally server-mediated via `getConsult`/`startConsult` server functions which verify `anon_token_hash`. Removed the redundant anonymous INSERT policy on `consults` so PostgREST no longer exposes a direct write path. `consult_messages` already has no anon policies."
+### Fix the runtime error blocking preview
+Console shows `Missing Supabase server environment variables...` again. The Proxy fallback I added before still throws when none of `process.env.SUPABASE_URL` / `import.meta.env.SUPABASE_URL` / `import.meta.env.VITE_SUPABASE_URL` are set at the moment `supabaseAdmin` is first touched. I'll re-inspect `client.server.ts` and:
+- Confirm the env-var names actually exposed to the Worker bundle (Vite only inlines `VITE_*` by default; bare `SUPABASE_URL` from `import.meta.env` won't be replaced unless explicitly defined).
+- Use `VITE_SUPABASE_URL` (already in `.env`) as the primary source for the URL fallback.
+- For `SUPABASE_SERVICE_ROLE_KEY`, keep `process.env` only (never expose to client). If it's genuinely missing in the Worker runtime, the lazy throw is correct behaviour — but I'll add the missing-var name to the error so we know which one is empty.
 
-### Side fix (preview is broken)
-Runtime errors show `Missing Supabase server environment variables...` again, plus a downstream "Failed to fetch dynamically imported module". My previous `import.meta.env` fallback in `client.server.ts` apparently isn't catching all paths. I'll re-check the file and ensure:
-- The fallback chain reads `process.env.X ?? import.meta.env.X` for both URL and service-role key.
-- The throw happens **lazily inside `createSupabaseClient()`**, not at module top-level — so importing the module never crashes SSR; only actually using `supabaseAdmin` without env throws.
-- Add a clearer error message listing which var was missing.
-
-### Files changed
-- New migration: `supabase/migrations/<ts>_lock_consults_insert.sql`
-- `src/integrations/supabase/client.server.ts` — lazy init + better fallback
-- Scanner: `mark_as_fixed` for `consults_anon_token_no_select_policy`
+### Files
+- `src/integrations/supabase/client.server.ts` — tighten env fallback + clearer error.
+- (Conditional) new migration if `prescriptions` is still in `supabase_realtime`.
+- Scanner: `mark_as_fixed` for `prescriptions_realtime_rls` with the verification result.
 
 ### Out of scope
-- `user_purchases` owner UPDATE column scope (separate finding).
-- Any future `consult_messages` anon flow — currently not used by the app.
+- `user_purchases_owner_insert_no_update_check` (separate finding — needs server-side purchase write path).
+- `intake_no_length_limits` (separate finding — needs zod input schemas).
 
