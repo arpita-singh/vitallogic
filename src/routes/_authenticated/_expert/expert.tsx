@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const FILTERS = ["pending", "escalated", "mine", "all"] as const;
+const FILTERS = ["pending", "drafts", "escalated", "mine", "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
 const searchSchema = z.object({
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/_authenticated/_expert/expert")({
   component: ExpertDashboard,
 });
 
-type Row = {
+type RxRow = {
   id: string;
   status: QueueItem["status"];
   created_at: string;
@@ -35,8 +35,15 @@ type Row = {
   } | null;
 };
 
+type DraftRow = {
+  id: string;
+  created_at: string;
+  intake: { symptoms?: string[]; contactName?: string; contactEmail?: string } | null;
+};
+
 const TAB_LABELS: Record<Filter, string> = {
   pending: "Pending",
+  drafts: "Drafts",
   escalated: "Escalated",
   mine: "Mine",
   all: "All",
@@ -49,6 +56,37 @@ function ExpertDashboard() {
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
+    if (filter === "drafts") {
+      // Show in-progress consults (no prescription yet) so experts see who's mid-flow.
+      const { data, error } = await supabase
+        .from("consults")
+        .select("id, created_at, intake")
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (error) {
+        console.error(error);
+        setItems([]);
+      } else {
+        const mapped: QueueItem[] = (data as unknown as DraftRow[]).map((c) => ({
+          id: c.id, // use consult id as item id since no prescription yet
+          status: "pending_review",
+          created_at: c.created_at,
+          claimed_by: null,
+          consult_id: c.id,
+          symptoms: c.intake?.symptoms ?? [],
+          red_flags: [],
+          contactName: c.intake?.contactName ?? null,
+          contactEmail: c.intake?.contactEmail ?? null,
+          isDraft: true,
+        }));
+        setItems(mapped);
+      }
+      setLoading(false);
+      return;
+    }
+
     let q = supabase
       .from("prescriptions")
       .select(
@@ -66,7 +104,7 @@ function ExpertDashboard() {
       console.error(error);
       setItems([]);
     } else {
-      const mapped: QueueItem[] = (data as unknown as Row[]).map((r) => ({
+      const mapped: QueueItem[] = (data as unknown as RxRow[]).map((r) => ({
         id: r.id,
         status: r.status,
         created_at: r.created_at,
@@ -95,6 +133,11 @@ function ExpertDashboard() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "prescriptions" },
+        () => void load(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "consults" },
         () => void load(),
       )
       .subscribe();
@@ -141,9 +184,13 @@ function ExpertDashboard() {
             <p className="text-center text-sm text-muted-foreground">Loading queue…</p>
           ) : items.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-surface/50 p-12 text-center">
-              <p className="font-display text-2xl text-foreground">Queue is clear.</p>
+              <p className="font-display text-2xl text-foreground">
+                {filter === "drafts" ? "No drafts in progress." : "Queue is clear."}
+              </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Take a moment. We'll let you know when something needs you.
+                {filter === "drafts"
+                  ? "Anonymous patients mid-consult will appear here."
+                  : "Take a moment. We'll let you know when something needs you."}
               </p>
             </div>
           ) : (
