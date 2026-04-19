@@ -2,6 +2,7 @@ import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-ro
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth";
 import { Section } from "@/components/section";
+import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 
 type LoginSearch = { redirect?: string };
 
@@ -95,6 +96,10 @@ function LoginPage() {
             {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
+
+        <div className="mt-6">
+          <SocialAuthButtons redirectTo={search.redirect} />
+        </div>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           New here?{" "}

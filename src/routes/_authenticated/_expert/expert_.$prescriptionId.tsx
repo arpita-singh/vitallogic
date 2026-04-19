@@ -15,6 +15,7 @@ import { ChatMessage } from "@/components/consult/chat-message";
 import { RecommendationEditor, type RxData } from "@/components/expert/recommendation-editor";
 import { AuditTrail, type AuditEntry } from "@/components/expert/audit-trail";
 import { ProductPicker, type AttachedProduct } from "@/components/expert/product-picker";
+import { PrescriptionReviewModal } from "@/components/expert/prescription-review-modal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import type { Intake } from "@/lib/consult-server";
@@ -63,6 +64,7 @@ function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
     const { data: p, error: pErr } = await supabase
@@ -206,7 +208,8 @@ function ReviewPage() {
       await writeAudit("attach_products", { added, removed });
     }
 
-    toast.success("Approved and sent.");
+    setReviewOpen(false);
+    toast.success("Approved — patient will see this on sign-in.");
     navigate({ to: "/expert", search: { filter: "pending" } });
   };
 
@@ -456,11 +459,11 @@ function ReviewPage() {
             ) : claimedByMe ? (
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={handleApprove}
+                  onClick={() => setReviewOpen(true)}
                   disabled={busy}
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Approve
+                  <CheckCircle2 className="h-4 w-4" /> Review &amp; approve
                 </button>
                 <button
                   onClick={handleEscalate}
@@ -492,6 +495,17 @@ function ReviewPage() {
           </div>
         )}
       </div>
+
+      <PrescriptionReviewModal
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        data={edit}
+        attachedProducts={attachedProducts}
+        reviewerNotes={notes}
+        patientName={consult.intake.contactName ?? authorName}
+        onConfirm={handleApprove}
+        busy={busy}
+      />
     </Section>
   );
 }
