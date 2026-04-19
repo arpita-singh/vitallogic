@@ -21,10 +21,10 @@ import { Route as IntegrityRouteImport } from './routes/integrity'
 import { Route as ConsultRouteImport } from './routes/consult'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ConsultConsultIdRouteImport } from './routes/consult.$consultId'
+import { Route as ConsultConsultIdRouteImport } from './routes/consult_.$consultId'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
-import { Route as ConsultConsultIdResultRouteImport } from './routes/consult.$consultId.result'
+import { Route as ConsultConsultIdResultRouteImport } from './routes/consult_.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
 import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert.$prescriptionId'
 
@@ -88,9 +88,9 @@ const IndexRoute = IndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConsultConsultIdRoute = ConsultConsultIdRouteImport.update({
-  id: '/$consultId',
-  path: '/$consultId',
-  getParentRoute: () => ConsultRoute,
+  id: '/consult_/$consultId',
+  path: '/consult/$consultId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   id: '/account',
@@ -121,7 +121,7 @@ const AuthenticatedExpertExpertPrescriptionIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/consult': typeof ConsultRouteWithChildren
+  '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -139,7 +139,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/consult': typeof ConsultRouteWithChildren
+  '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -159,7 +159,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
-  '/consult': typeof ConsultRouteWithChildren
+  '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -171,9 +171,9 @@ export interface FileRoutesById {
   '/unauthorized': typeof UnauthorizedRoute
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
-  '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
+  '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRouteWithChildren
-  '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
   '/_authenticated/_expert/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRouteTypes {
@@ -229,16 +229,16 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/_authenticated/_expert'
     | '/_authenticated/account'
-    | '/consult/$consultId'
+    | '/consult_/$consultId'
     | '/_authenticated/_expert/expert'
-    | '/consult/$consultId/result'
+    | '/consult_/$consultId/result'
     | '/_authenticated/_expert/expert/$prescriptionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
-  ConsultRoute: typeof ConsultRouteWithChildren
+  ConsultRoute: typeof ConsultRoute
   IntegrityRoute: typeof IntegrityRoute
   JourneyRoute: typeof JourneyRoute
   LoginRoute: typeof LoginRoute
@@ -248,6 +248,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   UnauthorizedRoute: typeof UnauthorizedRoute
+  ConsultConsultIdRoute: typeof ConsultConsultIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -336,12 +337,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/consult/$consultId': {
-      id: '/consult/$consultId'
-      path: '/$consultId'
+    '/consult_/$consultId': {
+      id: '/consult_/$consultId'
+      path: '/consult/$consultId'
       fullPath: '/consult/$consultId'
       preLoaderRoute: typeof ConsultConsultIdRouteImport
-      parentRoute: typeof ConsultRoute
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/account': {
       id: '/_authenticated/account'
@@ -357,8 +358,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/consult/$consultId/result': {
-      id: '/consult/$consultId/result'
+    '/consult_/$consultId/result': {
+      id: '/consult_/$consultId/result'
       path: '/result'
       fullPath: '/consult/$consultId/result'
       preLoaderRoute: typeof ConsultConsultIdResultRouteImport
@@ -432,21 +433,10 @@ const ConsultConsultIdRouteChildren: ConsultConsultIdRouteChildren = {
 const ConsultConsultIdRouteWithChildren =
   ConsultConsultIdRoute._addFileChildren(ConsultConsultIdRouteChildren)
 
-interface ConsultRouteChildren {
-  ConsultConsultIdRoute: typeof ConsultConsultIdRouteWithChildren
-}
-
-const ConsultRouteChildren: ConsultRouteChildren = {
-  ConsultConsultIdRoute: ConsultConsultIdRouteWithChildren,
-}
-
-const ConsultRouteWithChildren =
-  ConsultRoute._addFileChildren(ConsultRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
-  ConsultRoute: ConsultRouteWithChildren,
+  ConsultRoute: ConsultRoute,
   IntegrityRoute: IntegrityRoute,
   JourneyRoute: JourneyRoute,
   LoginRoute: LoginRoute,
@@ -456,6 +446,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   UnauthorizedRoute: UnauthorizedRoute,
+  ConsultConsultIdRoute: ConsultConsultIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

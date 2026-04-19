@@ -8,7 +8,7 @@ import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
-export const Route = createFileRoute("/consult/$consultId")({
+export const Route = createFileRoute("/consult_/$consultId")({
   head: () => ({
     meta: [{ title: "Your consult — Vital Logic" }],
   }),
@@ -47,8 +47,10 @@ function ConsultChatPage() {
       ]);
       if (cancelled) return;
       if (msgRes.error) {
-        toast.error("Could not load your consult.");
-        return;
+        // Don't toast — RLS may legitimately return an error for some
+        // states (e.g. anonymous consult viewed in another tab). Log only
+        // and continue with empty messages so the page still renders.
+        console.error("Could not load consult messages", msgRes.error);
       }
       const all = (msgRes.data ?? []) as Msg[];
       const sys = all.find((m) => m.role === "system");

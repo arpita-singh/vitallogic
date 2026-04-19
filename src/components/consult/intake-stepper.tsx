@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Mail } from "lucide-react";
 import type { Intake } from "@/lib/consult-server";
@@ -60,6 +60,16 @@ export function IntakeStepper({
     contactEmail: initialContactEmail ?? "",
     contactName: initialContactName ?? "",
   });
+
+  // When auth/profile resolves after mount, fill in any contact fields
+  // the user hasn't already edited themselves.
+  useEffect(() => {
+    setIntake((s) => ({
+      ...s,
+      contactEmail: s.contactEmail ? s.contactEmail : (initialContactEmail ?? ""),
+      contactName: s.contactName ? s.contactName : (initialContactName ?? ""),
+    }));
+  }, [initialContactEmail, initialContactName]);
 
   const total = 6;
   const progress = ((step + 1) / total) * 100;
