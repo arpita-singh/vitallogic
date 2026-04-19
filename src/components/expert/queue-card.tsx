@@ -12,6 +12,7 @@ export type QueueItem = {
   red_flags: string[];
   contactName: string | null;
   contactEmail: string | null;
+  isDraft?: boolean;
 };
 
 function timeAgo(iso: string): string {
