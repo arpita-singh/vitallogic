@@ -40,6 +40,13 @@ export const Route = createRootRoute({
       { name: "author", content: "Vital Logic" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:title", content: "Vital Logic — The Amazon of Health" },
+      { name: "twitter:title", content: "Vital Logic — The Amazon of Health" },
+      { name: "description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
+      { property: "og:description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
+      { name: "twitter:description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c53f2725-3962-4311-86ab-6784c883a33a/id-preview-cc2b0f47--c76ad899-2e2a-462d-974d-2590aeffe6ea.lovable.app-1776579310511.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c53f2725-3962-4311-86ab-6784c883a33a/id-preview-cc2b0f47--c76ad899-2e2a-462d-974d-2590aeffe6ea.lovable.app-1776579310511.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
