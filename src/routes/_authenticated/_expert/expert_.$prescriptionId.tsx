@@ -459,11 +459,11 @@ function ReviewPage() {
             ) : claimedByMe ? (
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={handleApprove}
+                  onClick={() => setReviewOpen(true)}
                   disabled={busy}
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Approve
+                  <CheckCircle2 className="h-4 w-4" /> Review &amp; approve
                 </button>
                 <button
                   onClick={handleEscalate}
