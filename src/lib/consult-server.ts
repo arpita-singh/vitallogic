@@ -72,16 +72,19 @@ export const startConsult = createServerFn({ method: "POST" })
     const { intake } = data;
     const supabase = getSupabaseForRequest();
 
-    const { data: consult, error } = await supabase
+    // Note: we generate the id ourselves because there's no SELECT RLS policy
+    // that lets anonymous callers read back a freshly-inserted row, so .select()
+    // after .insert() would fail.
+    const consultId = crypto.randomUUID();
+    const { error } = await supabase
       .from("consults")
-      .insert({ intake: intake as never, user_id: null, status: "draft" })
-      .select("id")
-      .maybeSingle();
+      .insert({ id: consultId, intake: intake as never, user_id: null, status: "draft" });
 
-    if (error || !consult) {
+    if (error) {
       console.error("startConsult insert failed", error);
       throw new Error("Could not start consult");
     }
+    const consult = { id: consultId };
 
     // Seed a system message with the intake summary so the AI has context.
     const { error: msgErr } = await supabase.from("consult_messages").insert({
