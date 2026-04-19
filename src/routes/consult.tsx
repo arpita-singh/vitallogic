@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Section, SectionHeader } from "@/components/section";
 import { IntakeStepper } from "@/components/consult/intake-stepper";
 import { startConsult, type Intake } from "@/lib/consult-server";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/consult")({
   head: () => ({
@@ -29,6 +30,27 @@ function ConsultPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const [profileName, setProfileName] = useState<string>("");
+
+  // Prefill name for signed-in users from their profile.
+  useEffect(() => {
+    if (!user) {
+      setProfileName("");
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data?.display_name) setProfileName(data.display_name);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const handleComplete = async (intake: Intake) => {
     setSubmitting(true);
@@ -44,7 +66,7 @@ function ConsultPage() {
           // ignore
         }
       }
-      toast.success("Intake submitted — let's chat with your AI guide.");
+      toast.success("Intake submitted — we'll email you when your recommendation is ready.");
       navigate({ to: "/consult/$consultId", params: { consultId } });
     } catch (e) {
       console.error(e);
@@ -65,7 +87,13 @@ function ConsultPage() {
       </Section>
 
       <Section className="!py-8">
-        <IntakeStepper onComplete={handleComplete} submitting={submitting} />
+        <IntakeStepper
+          onComplete={handleComplete}
+          submitting={submitting}
+          signedIn={!!user}
+          initialContactEmail={user?.email ?? ""}
+          initialContactName={profileName}
+        />
       </Section>
     </>
   );
