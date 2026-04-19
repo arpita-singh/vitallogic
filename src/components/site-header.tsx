@@ -103,12 +103,20 @@ export function SiteHeader() {
               </Link>
             </>
           ) : (
-            <Link
-              to="/consult"
-              className="hidden rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 sm:inline-flex"
-            >
-              Start consult
-            </Link>
+            <>
+              <Link
+                to="/login"
+                className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              >
+                Sign in
+              </Link>
+              <Link
+                to="/consult"
+                className="hidden rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 sm:inline-flex"
+              >
+                Start consult
+              </Link>
+            </>
           )}
           <button
             onClick={() => setOpen((v) => !v)}

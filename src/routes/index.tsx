@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Brain, Database, ShieldCheck, GraduationCap, Sparkles } from "lucide-react";
 import heroLotus from "@/assets/hero-lotus.jpg";
 import { Section, SectionHeader } from "@/components/section";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -33,6 +34,7 @@ const pillars = [
 ];
 
 function Home() {
+  const { isAuthenticated } = useAuth();
   return (
     <>
       {/* HERO */}
@@ -74,6 +76,15 @@ function Home() {
               Read our philosophy
             </Link>
           </div>
+
+          {!isAuthenticated && (
+            <p className="mt-5 text-sm text-muted-foreground">
+              Already had a consult?{" "}
+              <Link to="/login" className="text-gold hover:underline">
+                Sign in to view your prescription
+              </Link>
+            </p>
+          )}
 
           <div className="relative mt-14 w-full max-w-xl">
             <div className="absolute inset-0 -z-10 rounded-full bg-violet/20 blur-3xl" />
@@ -157,19 +168,48 @@ function Home() {
       <Section>
         <div className="relative overflow-hidden rounded-3xl border border-gold/30 bg-gradient-to-br from-surface to-background p-10 text-center md:p-16">
           <div className="absolute -top-20 left-1/2 h-60 w-60 -translate-x-1/2 rounded-full bg-violet/30 blur-3xl" />
-          <h2 className="font-display text-4xl md:text-5xl">
-            Begin your <span className="text-gradient-gold">first consult</span>
-          </h2>
-          <p className="mx-auto mt-4 max-w-md text-muted-foreground">
-            Five minutes. Free. Reviewed by a human practitioner before you receive anything.
-          </p>
-          <Link
-            to="/consult"
-            className="mt-7 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
-          >
-            Start now
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          {isAuthenticated ? (
+            <>
+              <h2 className="font-display text-4xl md:text-5xl">
+                View your <span className="text-gradient-gold">dashboard</span>
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+                Check your consults, prescriptions, and Owner's Manual in one place.
+              </p>
+              <Link
+                to="/account"
+                className="mt-7 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
+              >
+                Go to dashboard
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </>
+          ) : (
+            <>
+              <h2 className="font-display text-4xl md:text-5xl">
+                Begin your <span className="text-gradient-gold">first consult</span>
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+                Five minutes. Free. Reviewed by a human practitioner before you receive anything.
+              </p>
+              <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Link
+                  to="/consult"
+                  className="inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
+                >
+                  Start now
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center gap-2 text-sm text-gold hover:underline"
+                >
+                  Returning? Sign in
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </Section>
     </>
