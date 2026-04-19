@@ -26,7 +26,7 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
 import { Route as ConsultConsultIdResultRouteImport } from './routes/consult_.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
-import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert.$prescriptionId'
+import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert_.$prescriptionId'
 
 const UnauthorizedRoute = UnauthorizedRouteImport.update({
   id: '/unauthorized',
@@ -114,9 +114,9 @@ const AuthenticatedExpertExpertRoute =
   } as any)
 const AuthenticatedExpertExpertPrescriptionIdRoute =
   AuthenticatedExpertExpertPrescriptionIdRouteImport.update({
-    id: '/$prescriptionId',
-    path: '/$prescriptionId',
-    getParentRoute: () => AuthenticatedExpertExpertRoute,
+    id: '/expert_/$prescriptionId',
+    path: '/expert/$prescriptionId',
+    getParentRoute: () => AuthenticatedExpertRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -133,7 +133,7 @@ export interface FileRoutesByFullPath {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
+  '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
@@ -151,7 +151,7 @@ export interface FileRoutesByTo {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
+  '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
@@ -172,9 +172,9 @@ export interface FileRoutesById {
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRouteWithChildren
+  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
   '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
-  '/_authenticated/_expert/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
+  '/_authenticated/_expert/expert_/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -232,7 +232,7 @@ export interface FileRouteTypes {
     | '/consult_/$consultId'
     | '/_authenticated/_expert/expert'
     | '/consult_/$consultId/result'
-    | '/_authenticated/_expert/expert/$prescriptionId'
+    | '/_authenticated/_expert/expert_/$prescriptionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -372,37 +372,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertExpertRouteImport
       parentRoute: typeof AuthenticatedExpertRoute
     }
-    '/_authenticated/_expert/expert/$prescriptionId': {
-      id: '/_authenticated/_expert/expert/$prescriptionId'
-      path: '/$prescriptionId'
+    '/_authenticated/_expert/expert_/$prescriptionId': {
+      id: '/_authenticated/_expert/expert_/$prescriptionId'
+      path: '/expert/$prescriptionId'
       fullPath: '/expert/$prescriptionId'
       preLoaderRoute: typeof AuthenticatedExpertExpertPrescriptionIdRouteImport
-      parentRoute: typeof AuthenticatedExpertExpertRoute
+      parentRoute: typeof AuthenticatedExpertRoute
     }
   }
 }
 
-interface AuthenticatedExpertExpertRouteChildren {
+interface AuthenticatedExpertRouteChildren {
+  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRoute
   AuthenticatedExpertExpertPrescriptionIdRoute: typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 
-const AuthenticatedExpertExpertRouteChildren: AuthenticatedExpertExpertRouteChildren =
-  {
-    AuthenticatedExpertExpertPrescriptionIdRoute:
-      AuthenticatedExpertExpertPrescriptionIdRoute,
-  }
-
-const AuthenticatedExpertExpertRouteWithChildren =
-  AuthenticatedExpertExpertRoute._addFileChildren(
-    AuthenticatedExpertExpertRouteChildren,
-  )
-
-interface AuthenticatedExpertRouteChildren {
-  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRouteWithChildren
-}
-
 const AuthenticatedExpertRouteChildren: AuthenticatedExpertRouteChildren = {
-  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRouteWithChildren,
+  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRoute,
+  AuthenticatedExpertExpertPrescriptionIdRoute:
+    AuthenticatedExpertExpertPrescriptionIdRoute,
 }
 
 const AuthenticatedExpertRouteWithChildren =
@@ -451,3 +439,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

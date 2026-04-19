@@ -18,7 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import type { Intake } from "@/lib/consult-server";
 
-export const Route = createFileRoute("/_authenticated/_expert/expert/$prescriptionId")({
+export const Route = createFileRoute("/_authenticated/_expert/expert_/$prescriptionId")({
   head: () => ({
     meta: [{ title: "Review consult — Vital Logic" }],
   }),
