@@ -34,6 +34,7 @@ const pillars = [
 ];
 
 function Home() {
+  const { isAuthenticated } = useAuth();
   return (
     <>
       {/* HERO */}
