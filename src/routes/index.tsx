@@ -168,19 +168,48 @@ function Home() {
       <Section>
         <div className="relative overflow-hidden rounded-3xl border border-gold/30 bg-gradient-to-br from-surface to-background p-10 text-center md:p-16">
           <div className="absolute -top-20 left-1/2 h-60 w-60 -translate-x-1/2 rounded-full bg-violet/30 blur-3xl" />
-          <h2 className="font-display text-4xl md:text-5xl">
-            Begin your <span className="text-gradient-gold">first consult</span>
-          </h2>
-          <p className="mx-auto mt-4 max-w-md text-muted-foreground">
-            Five minutes. Free. Reviewed by a human practitioner before you receive anything.
-          </p>
-          <Link
-            to="/consult"
-            className="mt-7 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
-          >
-            Start now
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          {isAuthenticated ? (
+            <>
+              <h2 className="font-display text-4xl md:text-5xl">
+                View your <span className="text-gradient-gold">dashboard</span>
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+                Check your consults, prescriptions, and Owner's Manual in one place.
+              </p>
+              <Link
+                to="/account"
+                className="mt-7 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
+              >
+                Go to dashboard
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </>
+          ) : (
+            <>
+              <h2 className="font-display text-4xl md:text-5xl">
+                Begin your <span className="text-gradient-gold">first consult</span>
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+                Five minutes. Free. Reviewed by a human practitioner before you receive anything.
+              </p>
+              <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Link
+                  to="/consult"
+                  className="inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground glow-gold"
+                >
+                  Start now
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center gap-2 text-sm text-gold hover:underline"
+                >
+                  Returning? Sign in
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </Section>
     </>
