@@ -58,13 +58,14 @@ function ResultPage() {
     let cancelled = false;
     const load = async () => {
       const [rxRes, consultRes, unlockRes] = await Promise.all([
+        // Fetch ALL prescriptions for this consult; we resolve patient-facing
+        // priority client-side: approved > rejected > escalated > pending_review.
+        // This ensures an older approved Rx wins over a newer pending draft.
         supabase
           .from("prescriptions")
-          .select("id, status, draft, final, review_notes, attached_products")
+          .select("id, status, draft, final, review_notes, attached_products, created_at")
           .eq("consult_id", consultId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order("created_at", { ascending: false }),
         supabase.from("consults").select("intake, user_id").eq("id", consultId).maybeSingle(),
         user
           ? supabase
