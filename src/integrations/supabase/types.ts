@@ -14,16 +14,219 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      consult_messages: {
+        Row: {
+          consult_id: string
+          content: string
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["message_role"]
+        }
+        Insert: {
+          consult_id: string
+          content: string
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["message_role"]
+        }
+        Update: {
+          consult_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["message_role"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consult_messages_consult_id_fkey"
+            columns: ["consult_id"]
+            isOneToOne: false
+            referencedRelation: "consults"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consults: {
+        Row: {
+          created_at: string
+          id: string
+          intake: Json
+          status: Database["public"]["Enums"]["consult_status"]
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          intake?: Json
+          status?: Database["public"]["Enums"]["consult_status"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          intake?: Json
+          status?: Database["public"]["Enums"]["consult_status"]
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      prescription_audit: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          diff: Json | null
+          id: string
+          prescription_id: string
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          diff?: Json | null
+          id?: string
+          prescription_id: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          diff?: Json | null
+          id?: string
+          prescription_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prescription_audit_prescription_id_fkey"
+            columns: ["prescription_id"]
+            isOneToOne: false
+            referencedRelation: "prescriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prescriptions: {
+        Row: {
+          consult_id: string
+          created_at: string
+          draft: Json
+          final: Json | null
+          id: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["prescription_status"]
+          updated_at: string
+        }
+        Insert: {
+          consult_id: string
+          created_at?: string
+          draft: Json
+          final?: Json | null
+          id?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["prescription_status"]
+          updated_at?: string
+        }
+        Update: {
+          consult_id?: string
+          created_at?: string
+          draft?: Json
+          final?: Json | null
+          id?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["prescription_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prescriptions_consult_id_fkey"
+            columns: ["consult_id"]
+            isOneToOne: false
+            referencedRelation: "consults"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "user" | "expert" | "admin"
+      consult_status:
+        | "draft"
+        | "pending_review"
+        | "approved"
+        | "rejected"
+        | "escalated"
+      message_role: "user" | "assistant" | "system"
+      prescription_status:
+        | "pending_review"
+        | "approved"
+        | "rejected"
+        | "escalated"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +353,22 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["user", "expert", "admin"],
+      consult_status: [
+        "draft",
+        "pending_review",
+        "approved",
+        "rejected",
+        "escalated",
+      ],
+      message_role: ["user", "assistant", "system"],
+      prescription_status: [
+        "pending_review",
+        "approved",
+        "rejected",
+        "escalated",
+      ],
+    },
   },
 } as const
