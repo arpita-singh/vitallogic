@@ -1,6 +1,28 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
+import { createClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Database } from "@/integrations/supabase/types";
+
+/**
+ * Build a Supabase client that respects RLS. If the caller is signed in,
+ * forward their bearer token so auth.uid() works inside policies; if not,
+ * fall back to the anon role (which our `Consults: anyone can insert`
+ * policy allows when user_id is null).
+ */
+function getSupabaseForRequest() {
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY");
+  }
+  const request = getRequest();
+  const authHeader = request?.headers?.get("authorization") ?? undefined;
+  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    global: authHeader ? { headers: { Authorization: authHeader } } : undefined,
+    auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export type Intake = {
   symptoms: string[];
@@ -44,8 +66,9 @@ export const startConsult = createServerFn({ method: "POST" })
   .inputValidator((data: { intake: Intake; userId?: string | null }) => data)
   .handler(async ({ data }) => {
     const { intake, userId } = data;
+    const supabase = getSupabaseForRequest();
 
-    const { data: consult, error } = await supabaseAdmin
+    const { data: consult, error } = await supabase
       .from("consults")
       .insert({ intake: intake as never, user_id: userId ?? null, status: "draft" })
       .select("id")
@@ -57,7 +80,7 @@ export const startConsult = createServerFn({ method: "POST" })
     }
 
     // Seed a system message with the intake summary so the AI has context.
-    const { error: msgErr } = await supabaseAdmin.from("consult_messages").insert({
+    const { error: msgErr } = await supabase.from("consult_messages").insert({
       consult_id: consult.id,
       role: "system",
       content: intakeSummary(intake),
