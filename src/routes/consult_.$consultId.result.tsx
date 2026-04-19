@@ -139,12 +139,17 @@ function ResultPage() {
   const isOwner = user && consultOwnerId && user.id === consultOwnerId;
   const needsAuth = !isOwner;
   if (needsAuth) {
-    // Self-healing: signed-in user landing on an unclaimed consult that matches
-    // a remembered pending id → claim it now and re-load.
+    // Self-healing: signed-in user landing on an unclaimed consult.
+    // Try the claim if (a) it matches a remembered pending id, OR
+    // (b) the intake email matches the signed-in user's email.
+    // RLS still restricts the UPDATE to rows where user_id IS NULL, so this is safe.
     if (user && consultOwnerId === null) {
       const pending = getPendingConsult();
-      if (pending === consultId) {
-        // Fire-and-forget; on success we update local state to flip the gate immediately.
+      const emailMatches =
+        !!intakeEmail &&
+        !!user.email &&
+        intakeEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
+      if (pending === consultId || emailMatches) {
         void claimSpecificConsult(user.id, consultId).then((ok) => {
           if (ok) setConsultOwnerId(user.id);
         });
