@@ -6,13 +6,13 @@ import { Section, SectionHeader } from "@/components/section";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Vital Logic — The Amazon of Health" },
+      { title: "Vital Logic — Your Natural Health Hub" },
       {
         name: "description",
         content:
           "AI-guided wellness consults, audited by humans. From medication to education — your personal health operating system.",
       },
-      { property: "og:title", content: "Vital Logic — The Amazon of Health" },
+      { property: "og:title", content: "Vital Logic — Your Natural Health Hub" },
       {
         property: "og:description",
         content:
@@ -49,9 +49,9 @@ function Home() {
           </p>
 
           <h1 className="font-display text-5xl leading-[1.02] tracking-tight md:text-7xl lg:text-[5.5rem]">
-            The <span className="text-gradient-gold">Amazon</span>
+            Your <span className="text-gradient-gold">Natural</span>
             <br />
-            of Health
+            Health Hub
           </h1>
 
           <p className="mt-6 max-w-xl text-base text-muted-foreground md:text-lg">

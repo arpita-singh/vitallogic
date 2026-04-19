@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 180" fill="none">
+  <defs>
+    <radialGradient id="vlCore" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFE9A8" />
+      <stop offset="55%" stop-color="#F4C151" />
+      <stop offset="100%" stop-color="#B07A1E" />
+    </radialGradient>
+    <linearGradient id="vlPetal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#A78BFA" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#5B21B6" stop-opacity="0.25" />
+    </linearGradient>
+    <filter id="vlGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="b" />
+      <feMerge>
+        <feMergeNode in="b" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="vlSoft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+    <symbol id="vlPetalShape" viewBox="-20 -60 40 60">
+      <path d="M0,-58 C12,-44 17,-26 14,-8 C10,2 -10,2 -14,-8 C-17,-26 -12,-44 0,-58 Z"
+        fill="url(#vlPetal)" stroke="#C4B5FD" stroke-width="1.2" />
+      <path d="M0,-54 L0,-10" stroke="#F4C151" stroke-width="0.6" stroke-opacity="0.7" />
+      <path d="M-7,-30 L0,-26 L7,-30" stroke="#F4C151" stroke-width="0.5" stroke-opacity="0.55" fill="none" />
+      <path d="M-9,-44 L-3,-40" stroke="#F4C151" stroke-width="0.5" stroke-opacity="0.55" fill="none" />
+      <path d="M9,-44 L3,-40" stroke="#F4C151" stroke-width="0.5" stroke-opacity="0.55" fill="none" />
+      <circle cx="0" cy="-26" r="1.2" fill="#F4C151" />
+      <circle cx="-3" cy="-40" r="0.9" fill="#F4C151" />
+      <circle cx="3" cy="-40" r="0.9" fill="#F4C151" />
+      <circle cx="0" cy="-50" r="1" fill="#FFE9A8" />
+    </symbol>
+  </defs>
+
+  <!-- Outer violet halo -->
+  <circle cx="100" cy="100" r="58" fill="#7C3AED" fill-opacity="0.18" filter="url(#vlSoft)" />
+
+  <!-- Lotus petals (9: top, ±20°, ±45°, ±70°, ±90°) -->
+  <g filter="url(#vlGlow)" transform="translate(100 100)">
+    <use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" />
+    <g transform="rotate(-22)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(22)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(-45)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(45)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(-70)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(70)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(-95)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+    <g transform="rotate(95)"><use href="#vlPetalShape" width="40" height="60" x="-20" y="-60" /></g>
+  </g>
+
+  <!-- Inner gold sphere -->
+  <circle cx="100" cy="100" r="22" fill="url(#vlCore)" filter="url(#vlGlow)" />
+  <circle cx="93" cy="93" r="6" fill="#FFF6D6" fill-opacity="0.55" />
+</svg>
