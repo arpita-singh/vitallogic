@@ -1,6 +1,29 @@
 // Generate a draft prescription for a consult using tool-calling.
 // Public function — works for anonymous and authenticated consults.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { z } from "https://esm.sh/zod@3.23.8";
+
+// Hard caps to bound prompt size before it hits the AI gateway.
+const MAX_INTAKE_FIELD_CHARS = 2000;
+const MAX_PROMPT_CHARS = 30_000;
+
+const BodySchema = z.object({
+  consultId: z.string().uuid(),
+  anonToken: z.string().max(128).optional(),
+});
+
+function clip(value: unknown, max: number): unknown {
+  if (typeof value === "string") return value.length > max ? value.slice(0, max) + "…[truncated]" : value;
+  if (Array.isArray(value)) return value.slice(0, 50).map((v) => clip(v, max));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = clip(v, max);
+    }
+    return out;
+  }
+  return value;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
