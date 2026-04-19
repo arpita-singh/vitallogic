@@ -77,7 +77,7 @@ function AccountPage() {
     if (!user) return;
     const { data } = await supabase
       .from("consults")
-      .select("id, status, created_at")
+      .select("id, status, created_at, prescriptions(id, status, reviewed_at)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     setConsults((data ?? []) as ConsultRow[]);
