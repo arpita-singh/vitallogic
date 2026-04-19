@@ -1,33 +1,61 @@
 
-The user wants a README.md added to the project root. This is a simple, single-file generation task — no code changes, no architectural decisions. I'll inspect a few key files to make the README accurate, then present a tight plan.
+The user wants me to:
+1. Derive test cases from the README's documented user journeys
+2. Run automated browser tests against the live preview
+3. Report results
 
-Already known from context:
-- TanStack Start v1 + React 19 + Vite 7 + Tailwind v4
-- Lovable Cloud (Supabase) backend with RLS, edge functions (`consult-chat`, `generate-prescription`)
-- Routes: marketing (`/`, `/origins`, `/philosophy`, `/pillars`, `/journey`, `/integrity`), patient flow (`/consult`, `/consult/$id`, `/consult/$id/result`), expert dashboard (`/expert`, `/expert/$prescriptionId`), auth (`/login`, `/signup`, `/reset-password`, `/account`)
-- Server functions in `src/lib/consult-server.ts` (startConsult, saveConsultContact, claimConsult)
-- Intake stepper with 6 steps including the new Contact step
-- Anonymous + authenticated consult flows; expert role gating
+This requires `browser--*` tools (navigate, act, observe, screenshot) which are unavailable in plan mode. I need approval to proceed.
 
-## Plan
+## Test scope (derived from README)
 
-Create a single new file: **`README.md`** at project root.
+Three key user journeys are documented:
 
-### Sections
+### Journey 1 — Anonymous patient intake
+- Navigate to `/consult` (incognito-equivalent: signed-out session)
+- Complete all 6 intake steps: Symptoms → Timing → Lifestyle → Safety → Goals → Contact
+- Submit and verify redirect to `/consult/$consultId`
+- Confirm AI chat page loads
+- Verify the contact details (name + email entered in step 6) were persisted via DB query
 
-1. **Project name + tagline** — VitalLogic: AI-assisted naturopathic consultations with expert review.
-2. **What it does** — Patient completes 6-step intake → AI chat refines context → expert reviews & approves a prescription → patient receives recommendation.
-3. **Tech stack** — TanStack Start v1, React 19, Vite 7, Tailwind v4, shadcn/ui, Lovable Cloud (Postgres + Auth + Edge Functions + Storage).
-4. **Project structure** — Brief tree highlighting `src/routes/`, `src/components/consult/`, `src/components/expert/`, `src/lib/`, `src/integrations/supabase/`, `supabase/functions/`, `supabase/migrations/`.
-5. **Key flows** — Anonymous patient intake, authenticated consult claiming, expert queue & prescription editor.
-6. **Local development** — `bun install`, `bun run dev`; mention `.env` is auto-managed by Lovable Cloud.
-7. **Backend** — Brief note that data, auth, and edge functions are managed via Lovable Cloud; link to `supabase/migrations/` for schema history and `supabase/functions/` for edge functions.
-8. **Deployment** — Auto-deployed via Lovable; production URL `https://vitallogic.lovable.app`.
-9. **Editing** — Short "Edit with Lovable" pointer (project URL) plus "edit locally with your IDE" option.
-10. **License / disclaimer** — Brief medical disclaimer that recommendations are not a substitute for professional medical advice.
+### Journey 2 — Authenticated patient
+- Sign in with an existing test account (will need credentials from user OR I can sign up a fresh account)
+- Navigate to `/consult`
+- Verify Contact step pre-fills email from account
+- Complete intake; confirm consult auto-claims to the user
+- Check `/account` history shows the consult
 
-### Constraints
-- No emojis.
-- Keep under ~150 lines.
-- No mention of Supabase by name in user-facing copy — refer to "Lovable Cloud" / "backend".
-- Don't touch any other files.
+### Journey 3 — Expert review
+- Sign in as expert role user (need credentials)
+- Navigate to `/expert`
+- Verify queue loads with cards
+- Confirm the consult from Journey 1 appears showing the captured contact name/email (the bug fix from prior turns)
+- Open one prescription via `/expert/$prescriptionId` and verify editor loads
+
+### Additional smoke checks
+- Marketing routes load: `/`, `/origins`, `/philosophy`, `/pillars`, `/journey`, `/integrity`
+- Auth routes render: `/login`, `/signup`, `/reset-password`
+- Unauthorized route gates `/expert` for non-experts (currently the user is on `/unauthorized` — already a signal)
+
+## Approach
+
+1. **Smoke pass** — `navigate_to_sandbox` to each marketing + auth route, screenshot, check for console errors.
+2. **Anonymous intake** — navigate to `/consult` signed-out, walk all 6 steps with `act`, capture the resulting consultId, query DB to confirm `intake.contactEmail` and `intake.contactName` saved.
+3. **Expert journey** — needs an expert account. I'll ask for credentials before running this leg (or the user can confirm I should sign up + manually grant role).
+4. **Authenticated patient journey** — same credential question; I can sign up a fresh test account inline if approved.
+
+## Credentials I need
+
+The expert and authenticated-patient legs need login credentials. Options:
+- User provides email/password for an existing expert account
+- I sign up a brand-new account in-flow for the patient leg, and skip the expert leg (or user grants role afterward)
+
+I'll ask once, after approval, before starting the auth-gated legs. Anonymous + smoke can run immediately.
+
+## Reporting
+
+For each journey: PASS/FAIL, screenshots at key steps, any console errors, DB confirmation snippet for persistence checks. Final summary table at the end.
+
+## Notes
+- The user is currently on `/unauthorized` — they likely tried to access `/expert` without the role. Worth flagging in the report.
+- Browser session is shared with the preview iframe; if a Supabase session leaks in, I'll sign out first to simulate "incognito".
+- Will not perform destructive actions (no delete/reject on real prescriptions).
