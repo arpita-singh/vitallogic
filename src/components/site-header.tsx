@@ -191,9 +191,14 @@ export function SiteHeader() {
               <Link
                 to="/account"
                 onClick={() => setOpen(false)}
-                className="mt-2 rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
+                className="mt-2 flex items-center justify-between rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
               >
-                My account
+                <span>My account</span>
+                {readyCount > 0 && (
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
+                    {readyCount}
+                  </span>
+                )}
               </Link>
               <Link
                 to="/owner-manual"
