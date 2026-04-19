@@ -1,11 +1,16 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
 import { claimConsult } from "@/lib/consult-server";
 
+type AccountSearch = { ready?: number };
+
 export const Route = createFileRoute("/_authenticated/account")({
+  validateSearch: (search: Record<string, unknown>): AccountSearch => ({
+    ready: search.ready === "1" || search.ready === 1 ? 1 : undefined,
+  }),
   head: () => ({
     meta: [{ title: "My account — Vital Logic" }],
   }),
@@ -44,8 +49,11 @@ const STATUS_STYLES: Record<string, string> = {
 function AccountPage() {
   const { user, roles, signOut, hasAnyRole } = useAuth();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [displayName, setDisplayName] = useState<string>("");
   const [consults, setConsults] = useState<ConsultRow[]>([]);
+  const [highlightReady, setHighlightReady] = useState(false);
+  const readyBannerRef = useRef<HTMLDivElement | null>(null);
 
   // Claim any anonymous consult stashed in localStorage
   useEffect(() => {
@@ -100,6 +108,22 @@ function AccountPage() {
     navigate({ to: "/" });
   };
 
+  // Highlight the ready banner when arriving via the header notification (?ready=1)
+  useEffect(() => {
+    if (search.ready !== 1) return;
+    if (consults.length === 0) return;
+    const hasReady = consults.some((c) =>
+      (c.prescriptions ?? []).some((p) => p.status === "approved"),
+    );
+    if (!hasReady) return;
+    const t = window.setTimeout(() => {
+      readyBannerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setHighlightReady(true);
+      window.setTimeout(() => setHighlightReady(false), 2400);
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [search.ready, consults]);
+
   return (
     <Section className="py-16 md:py-24">
       <div className="mx-auto max-w-2xl">
@@ -128,7 +152,12 @@ function AccountPage() {
           );
           if (ready.length === 0) return null;
           return (
-            <div className="mt-10 rounded-2xl border border-gold/40 bg-gold/5 p-6">
+            <div
+              ref={readyBannerRef}
+              className={`mt-10 rounded-2xl border border-gold/40 bg-gold/5 p-6 transition-shadow duration-500 ${
+                highlightReady ? "ring-2 ring-gold ring-offset-2 ring-offset-background animate-pulse shadow-[0_0_40px_rgba(212,175,55,0.35)]" : ""
+              }`}
+            >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-xl text-gold" aria-hidden>
                   ★

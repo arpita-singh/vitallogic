@@ -1,6 +1,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
-import { useAuth } from "@/lib/auth";
+import { useAuth, getPreferredLandingPath, type AppRole } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 
@@ -38,12 +39,27 @@ function LoginPage() {
     setError(null);
     setSubmitting(true);
     const { error: err } = await signIn(email, password);
-    setSubmitting(false);
     if (err) {
+      setSubmitting(false);
       setError(err.message);
       return;
     }
-    navigate({ to: search.redirect ?? "/account" });
+    let target = search.redirect;
+    if (!target) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData.session?.user?.id;
+      let roles: AppRole[] = [];
+      if (uid) {
+        const { data: roleRows } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", uid);
+        roles = (roleRows ?? []).map((r) => r.role as AppRole);
+      }
+      target = getPreferredLandingPath(roles);
+    }
+    setSubmitting(false);
+    navigate({ to: target });
   };
 
   return (

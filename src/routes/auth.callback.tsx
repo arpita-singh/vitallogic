@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { claimPendingConsult } from "@/lib/claim-consult";
 import { Section } from "@/components/section";
+import { getPreferredLandingPath, type AppRole } from "@/lib/auth";
 
 type CallbackSearch = { redirect?: string };
 
@@ -25,11 +26,21 @@ function CallbackPage() {
       await new Promise((r) => setTimeout(r, 100));
       const { data } = await supabase.auth.getSession();
       const userId = data.session?.user?.id;
-      let target = search.redirect ?? "/account";
+      let target = search.redirect;
       if (userId) {
         const claimedId = await claimPendingConsult(userId);
-        if (claimedId) target = `/consult/${claimedId}/result`;
+        if (claimedId) {
+          target = `/consult/${claimedId}/result`;
+        } else if (!target) {
+          const { data: roleRows } = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", userId);
+          const roles = (roleRows ?? []).map((r) => r.role as AppRole);
+          target = getPreferredLandingPath(roles);
+        }
       }
+      if (!target) target = "/account";
       if (!cancelled) void navigate({ to: target });
     };
     void run();
