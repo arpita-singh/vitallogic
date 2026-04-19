@@ -2,6 +2,7 @@ import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-ro
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth";
 import { Section } from "@/components/section";
+import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 
 type LoginSearch = { redirect?: string };
 
