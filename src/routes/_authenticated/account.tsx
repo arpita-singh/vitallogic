@@ -12,10 +12,17 @@ export const Route = createFileRoute("/_authenticated/account")({
   component: AccountPage,
 });
 
+type PrescriptionRow = {
+  id: string;
+  status: string;
+  reviewed_at: string | null;
+};
+
 type ConsultRow = {
   id: string;
   status: string;
   created_at: string;
+  prescriptions: PrescriptionRow[] | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
