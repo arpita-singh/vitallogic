@@ -26,6 +26,7 @@ import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthenticatedOwnerManualRouteImport } from './routes/_authenticated/owner-manual'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
+import { Route as ConsultConsultIdIndexRouteImport } from './routes/consult_.$consultId.index'
 import { Route as ConsultConsultIdResultRouteImport } from './routes/consult_.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
 import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert_.$prescriptionId'
@@ -114,6 +115,11 @@ const AuthenticatedExpertRoute = AuthenticatedExpertRouteImport.update({
   id: '/_expert',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const ConsultConsultIdIndexRoute = ConsultConsultIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ConsultConsultIdRoute,
+} as any)
 const ConsultConsultIdResultRoute = ConsultConsultIdResultRouteImport.update({
   id: '/result',
   path: '/result',
@@ -150,6 +156,7 @@ export interface FileRoutesByFullPath {
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/consult/$consultId/': typeof ConsultConsultIdIndexRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRoutesByTo {
@@ -167,9 +174,9 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/auth/callback': typeof AuthCallbackRoute
-  '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/consult/$consultId': typeof ConsultConsultIdIndexRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRoutesById {
@@ -193,6 +200,7 @@ export interface FileRoutesById {
   '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
   '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/consult_/$consultId/': typeof ConsultConsultIdIndexRoute
   '/_authenticated/_expert/expert_/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRouteTypes {
@@ -215,6 +223,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
+    | '/consult/$consultId/'
     | '/expert/$prescriptionId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -232,9 +241,9 @@ export interface FileRouteTypes {
     | '/account'
     | '/owner-manual'
     | '/auth/callback'
-    | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
+    | '/consult/$consultId'
     | '/expert/$prescriptionId'
   id:
     | '__root__'
@@ -257,6 +266,7 @@ export interface FileRouteTypes {
     | '/consult_/$consultId'
     | '/_authenticated/_expert/expert'
     | '/consult_/$consultId/result'
+    | '/consult_/$consultId/'
     | '/_authenticated/_expert/expert_/$prescriptionId'
   fileRoutesById: FileRoutesById
 }
@@ -398,6 +408,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/consult_/$consultId/': {
+      id: '/consult_/$consultId/'
+      path: '/'
+      fullPath: '/consult/$consultId/'
+      preLoaderRoute: typeof ConsultConsultIdIndexRouteImport
+      parentRoute: typeof ConsultConsultIdRoute
+    }
     '/consult_/$consultId/result': {
       id: '/consult_/$consultId/result'
       path: '/result'
@@ -454,10 +471,12 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 
 interface ConsultConsultIdRouteChildren {
   ConsultConsultIdResultRoute: typeof ConsultConsultIdResultRoute
+  ConsultConsultIdIndexRoute: typeof ConsultConsultIdIndexRoute
 }
 
 const ConsultConsultIdRouteChildren: ConsultConsultIdRouteChildren = {
   ConsultConsultIdResultRoute: ConsultConsultIdResultRoute,
+  ConsultConsultIdIndexRoute: ConsultConsultIdIndexRoute,
 }
 
 const ConsultConsultIdRouteWithChildren =
