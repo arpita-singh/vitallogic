@@ -12,6 +12,7 @@ import appCss from "../styles.css?url";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { Toaster } from "@/components/ui/sonner";
 import type { RouterContext } from "@/router";
 
 function NotFoundComponent() {
@@ -108,6 +109,7 @@ function RootComponent() {
           </main>
           <SiteFooter />
         </div>
+        <Toaster richColors position="top-center" />
       </AuthBridge>
     </AuthProvider>
   );
