@@ -48,6 +48,7 @@ function ConsultPage() {
     } catch (e) {
       console.error(e);
       toast.error("Could not start your consult. Please try again.");
+    } finally {
       setSubmitting(false);
     }
   };
