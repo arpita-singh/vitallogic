@@ -7,6 +7,8 @@ import { ChatMessage } from "@/components/consult/chat-message";
 import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { getConsult } from "@/lib/consult-server";
+import { getAnonTokenFor } from "@/lib/claim-consult";
 
 export const Route = createFileRoute("/consult_/$consultId/")({
   head: () => ({
@@ -33,38 +35,39 @@ function ConsultChatPage() {
   const [hasContact, setHasContact] = useState(false);
   const [hasApprovedRx, setHasApprovedRx] = useState(false);
   const [hasPendingRx, setHasPendingRx] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial load
+  // Initial load — uses the secure server function so anonymous consults
+  // are bound to this browser's anonToken.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [msgRes, consultRes, rxRes] = await Promise.all([
-        supabase
-          .from("consult_messages")
-          .select("role, content")
-          .eq("consult_id", consultId)
-          .order("created_at", { ascending: true }),
-        supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
-        supabase
-          .from("prescriptions")
-          .select("id, status")
-          .eq("consult_id", consultId),
-      ]);
-      if (cancelled) return;
-      if (msgRes.error) {
-        console.error("Could not load consult messages", msgRes.error);
+      try {
+        const res = await getConsult({
+          data: { consultId, anonToken: getAnonTokenFor(consultId) },
+        });
+        if (cancelled) return;
+        const all = (res.messages ?? []) as Msg[];
+        const sys = all.find((m) => m.role === "system");
+        if (sys) setIntakeSummary(sys.content);
+        setMessages(all.filter((m) => m.role !== "system"));
+        const intake = ((res.consult?.intake as { contactEmail?: string }) ?? {}) as {
+          contactEmail?: string;
+        };
+        setHasContact(Boolean(intake.contactEmail));
+        const rxRows = (res.prescriptions ?? []) as { status: string }[];
+        setHasApprovedRx(rxRows.some((r) => r.status === "approved"));
+        setHasPendingRx(
+          rxRows.some((r) => r.status === "pending_review" || r.status === "escalated"),
+        );
+        setLoaded(true);
+      } catch (e) {
+        if (cancelled) return;
+        console.error("Could not load consult", e);
+        setAccessDenied(true);
+        setLoaded(true);
       }
-      const all = (msgRes.data ?? []) as Msg[];
-      const sys = all.find((m) => m.role === "system");
-      if (sys) setIntakeSummary(sys.content);
-      setMessages(all.filter((m) => m.role !== "system"));
-      const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
-      setHasContact(Boolean(intake.contactEmail));
-      const rxRows = (rxRes.data ?? []) as { status: string }[];
-      setHasApprovedRx(rxRows.some((r) => r.status === "approved"));
-      setHasPendingRx(rxRows.some((r) => r.status === "pending_review" || r.status === "escalated"));
-      setLoaded(true);
     })();
     return () => {
       cancelled = true;
@@ -116,17 +119,24 @@ function ConsultChatPage() {
     };
 
     try {
+      // Prefer the user's JWT if signed in; otherwise rely on the anon
+      // token the server stored when this consult was created.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const anonToken = getAnonTokenFor(consultId);
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${accessToken ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ consultId, messages: payloadMessages }),
+        body: JSON.stringify({ consultId, anonToken, messages: payloadMessages }),
       });
 
       if (!resp.ok) {
-        if (resp.status === 429) toast.error("Slow down — try again in a moment.");
+        if (resp.status === 401 || resp.status === 403) {
+          toast.error("This consult can't be accessed from this browser.");
+        } else if (resp.status === 429) toast.error("Slow down — try again in a moment.");
         else if (resp.status === 402) toast.error("AI credits exhausted — please add credits.");
         else toast.error("Couldn't reach the AI. Please try again.");
         setStreaming(false);
@@ -179,7 +189,7 @@ function ConsultChatPage() {
     setGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke("generate-prescription", {
-        body: { consultId },
+        body: { consultId, anonToken: getAnonTokenFor(consultId) },
       });
       if (error) throw error;
       if (!data?.prescriptionId) throw new Error("No prescription returned");
@@ -194,9 +204,27 @@ function ConsultChatPage() {
   const userTurns = messages.filter((m) => m.role === "user").length;
   const canGenerate = userTurns >= 3 && !streaming && !generating;
 
-  // If a prescription already exists for this consult, redirect to the result
-  // page. This only fires from /consult/$consultId (the index), never from
-  // /consult/$consultId/result, so no redirect loop is possible.
+  if (loaded && accessDenied) {
+    return (
+      <Section>
+        <div className="mx-auto max-w-md text-center">
+          <h1 className="font-display text-2xl text-foreground">Consult unavailable</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            This consult can't be opened from this browser. If you started it elsewhere,
+            sign in with the account that owns it, or start a new consult.
+          </p>
+          <Link
+            to="/consult"
+            className="mt-6 inline-flex rounded-full bg-primary px-5 py-2 text-sm text-primary-foreground"
+          >
+            Start a new consult
+          </Link>
+        </div>
+      </Section>
+    );
+  }
+
+  // If a prescription already exists for this consult, redirect to the result.
   if (loaded && (hasApprovedRx || hasPendingRx)) {
     return (
       <Navigate
