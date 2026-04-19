@@ -54,24 +54,25 @@ function ResultPage() {
   const [loading, setLoading] = useState(true);
   const [consultOwnerId, setConsultOwnerId] = useState<string | null | undefined>(undefined);
   const [intakeEmail, setIntakeEmail] = useState<string | undefined>(undefined);
+  const [claiming, setClaiming] = useState(false);
+  const claimAttempted = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      // Use the secure server function for the consult + intake (anonymous
-      // intake data is no longer publicly readable via RLS).
+      // Edge function path (has the service-role key). Works for signed-in
+      // owners (JWT auto-attached by supabase.functions.invoke) and for the
+      // original anonymous browser (anonToken).
       type ConsultRow = { intake?: { contactEmail?: string }; user_id?: string | null };
       let consultRow: ConsultRow | null = null;
       try {
-        const res = await getConsult({
-          data: { consultId, anonToken: getAnonTokenFor(consultId) },
-        });
+        const res = await readConsult(consultId, getAnonTokenFor(consultId));
         if (cancelled) return;
         consultRow = (res.consult as ConsultRow | null) ?? null;
       } catch (e) {
         // Unauthorized or not-found — keep consultRow null and let the
         // auth gate below handle prompting the user to sign in.
-        console.warn("getConsult denied", e);
+        console.warn("readConsult denied", e);
       }
 
       // Prescriptions remain readable to the owner via the existing RLS
@@ -94,7 +95,6 @@ function ResultPage() {
       ]);
       if (cancelled) return;
       if (rxRes.error) console.error(rxRes.error);
-      // Patient-facing priority: approved > rejected > escalated > pending_review
       const allRx = (rxRes.data ?? []) as unknown as Rx[];
       const priority: Rx["status"][] = ["approved", "rejected", "escalated", "pending_review"];
       let chosen: Rx | null = null;
@@ -115,8 +115,6 @@ function ResultPage() {
     };
     void load();
 
-    // Realtime: refresh when this consult's prescription updates (e.g. expert approves).
-    // Private channel so realtime.messages RLS gates who can subscribe to this topic.
     const channel = supabase
       .channel(`rx-${consultId}`, { config: { private: true } })
       .on(
@@ -132,6 +130,31 @@ function ResultPage() {
     };
   }, [consultId, user]);
 
+  // Self-healing claim: fires AT MOST once per mount via the ref guard.
+  // Previously this lived in render, which re-fired on every state change
+  // and produced a 401 loop.
+  useEffect(() => {
+    if (loading) return;
+    if (!user) return;
+    if (consultOwnerId !== null) return; // owned (or unknown) — nothing to do
+    if (claimAttempted.current) return;
+
+    const pending = getPendingConsultId();
+    const emailMatches =
+      !!intakeEmail &&
+      !!user.email &&
+      intakeEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
+    if (pending !== consultId && !emailMatches) return;
+
+    claimAttempted.current = true;
+    setClaiming(true);
+    void claimSpecificConsult(user.id, consultId)
+      .then((ok) => {
+        if (ok) setConsultOwnerId(user.id);
+      })
+      .finally(() => setClaiming(false));
+  }, [loading, user, consultOwnerId, intakeEmail, consultId]);
+
   const handleUnlock = async () => {
     if (!user) {
       toast.info("Please sign in to unlock your Owner's Manual.");
@@ -140,7 +163,7 @@ function ResultPage() {
     }
     setUnlocking(true);
     try {
-      await unlockEducation({ data: { consultId } });
+      await unlockEducationRequest(consultId);
       toast.success("Unlocked. Welcome to your Owner's Manual.");
       void navigate({ to: "/owner-manual" });
     } catch (err) {
