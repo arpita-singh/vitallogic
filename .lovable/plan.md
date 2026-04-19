@@ -1,75 +1,52 @@
 
 
-## Plan — Review modal + sign-up flow for unauthenticated patients
+The account page (`src/routes/_authenticated/account.tsx`) already lists consults with status badges and links to `/consult/{id}/result`. What's missing is a **prominent banner at the top** that surfaces *actionable* consults — specifically those with an approved prescription waiting to be viewed — so the patient sees them immediately on landing.
 
-Two parts, no email needed yet.
+## Plan — Approved-prescription banner on account dashboard
 
----
+### What changes
 
-### Part 1 — Prescription review modal (pre-send gate)
+`src/routes/_authenticated/account.tsx` only — no new files, no DB changes.
 
-New component `src/components/expert/prescription-review-modal.tsx`:
-- shadcn `Dialog` (already installed).
-- Trigger: replace the current bare "Approve" button in `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` with **"Review & approve"**.
-- Body renders a **patient-facing preview** built from the live `edit` + `attachedProducts` state, mirroring exactly what `consult_.$consultId.result.tsx` shows (summary, red flags, each recommendation card with rationale/safety/citations, attached product cards). Wrapped in a "Patient preview" frame so the expert knows it's a preview.
-- Footer: `Back to edit` (close) and `Approve & publish` (primary, gold).
-- `Approve & publish` runs the existing approve mutation unchanged (status, final, attached_products, reviewed_*, audit row). On success: toast "Approved — patient will see this on sign-in", close modal, page transitions to the resolved/approved view.
-- A small "Patient access" notice in the modal footer: *"Patient must sign in or sign up with the email used at intake to view this prescription."* — sets expectations until email is wired.
+### Approach
 
-Existing inline editor on the page stays intact — modal is the final gate, not a replacement.
+1. **Extend the consults query** to also fetch related prescriptions in one round-trip:
+   ```
+   .select("id, status, created_at, prescriptions(id, status, reviewed_at)")
+   ```
+   RLS already allows the patient to see their own approved prescriptions via the existing `Prescriptions: owner sees approved` policy, so anything that comes back is viewable.
 
----
+2. **Compute "ready" consults** — those with at least one prescription where `status = 'approved'`.
 
-### Part 2 — Sign-up / sign-in for unauthenticated patients viewing a result
+3. **Render a gold-accented banner** above the existing "Your consults" section when `readyConsults.length > 0`:
+   - Headline: *"Your prescription is ready"* (singular) or *"You have N prescriptions ready to view"* (plural).
+   - Subtext: *"Your practitioner has approved your recommendations."*
+   - For each ready consult, a row with the consult date + a primary "View prescription" button linking to `/consult/$consultId/result`.
+   - Styling: `border-gold/40 bg-gold/5` card matching the existing Sunny Goth tokens (consistent with the expert-dashboard card already on the page).
+   - Dismissable: no — these are actionable, should stay until viewed. (Could add a "viewed_at" tracker later if needed; out of scope now.)
 
-**Problem today:** when an anonymous user finishes a consult, their consult has `user_id = null`. Even after expert approval, they can't see the prescription because the RLS policy `Prescriptions: owner sees approved` requires `consults.user_id = auth.uid()`.
+4. **Preserve existing list** — the full consults list below the banner stays unchanged so patients still see drafts / pending review / older consults with their status badges.
 
-**Fix — gated result view + claim-on-signin:**
+5. **Empty/loading states** — if no ready consults, banner simply doesn't render. No loading skeleton needed (the page already renders synchronously around the consults fetch).
 
-1. **`src/routes/consult_.$consultId.result.tsx`** — add an auth/ownership gate at the top:
-   - If consult `user_id IS NULL` (anonymous) OR the current user doesn't own it → render a **"Sign in to view your prescription"** card instead of the result body.
-   - The card explains: "Your practitioner is reviewing your consult. Sign in or create an account with the email you used at intake to receive your prescription."
-   - Two CTAs: **Sign in** and **Create account**, each linking to `/login?redirect=/consult/{id}/result` and `/signup?redirect=/consult/{id}/result&email={intake.contactEmail}` so the user lands back here after auth.
+### Layout sketch
 
-2. **Auto-claim anonymous consult on auth** — new helper `src/lib/claim-consult.ts`:
-   - Reads pending consult id from `sessionStorage` key `pendingConsultId` (set whenever the result page detects an anonymous consult).
-   - After successful sign-in / sign-up / OAuth callback, if the stored consult is still `user_id IS NULL`, run `update consults set user_id = auth.uid() where id = ? and user_id is null` (already permitted by the existing `Consults: claim anonymous` RLS policy).
-   - Clear the storage key, navigate to `/consult/{id}/result`.
-   - Hook this helper into `src/lib/auth.tsx`'s `signIn` / `signUp` success paths and into a new `/auth/callback` handler the OAuth providers redirect to (TanStack route file `src/routes/auth.callback.tsx`).
-
-3. **Login + Signup pages — add social sign-in buttons** (`src/routes/login.tsx`, `src/routes/signup.tsx`):
-   - Existing email + password forms stay.
-   - Add three branded buttons under a divider: **Continue with Google**, **Continue with Apple**, **Continue with Facebook**.
-   - Lovable Cloud supports Google + Apple natively (managed credentials, no setup needed). **Facebook is NOT supported by Lovable Cloud's managed auth** — I'll explain in the modal/UI that Facebook requires the external Supabase integration to enable, and either:
-     - **(a)** Ship Google + Apple now (recommended — zero setup, works immediately), OR
-     - **(b)** Also add Facebook with a "Coming soon" disabled state until the user opts to wire it up via the Supabase dashboard.
-   - Default: ship Google + Apple as live buttons; Facebook as a disabled "Coming soon — requires extra setup" button so the design is in place. I'll surface this clearly to the user before building.
-
-4. **Use Lovable's managed OAuth helper** — call `lovable.auth.signInWithOAuth("google" | "apple", { redirect_uri: window.location.origin + "/auth/callback" })`. The configure-social-login tool will scaffold `src/integrations/lovable/` and install `@lovable.dev/cloud-auth-js` automatically — I won't hand-write that module.
-
-5. **`/auth/callback` route** — receives the post-OAuth redirect, runs `claimPendingConsult()`, then navigates to the stored `redirect` search param (or `/`).
-
----
-
-### Files
-
-**New:**
-- `src/components/expert/prescription-review-modal.tsx`
-- `src/lib/claim-consult.ts`
-- `src/routes/auth.callback.tsx`
-- (auto-created by social-login tool) `src/integrations/lovable/index.ts` + package install
-
-**Modified:**
-- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` — swap Approve → modal trigger
-- `src/routes/consult_.$consultId.result.tsx` — auth/ownership gate + sign-in CTAs + sessionStorage write
-- `src/routes/login.tsx` — add social buttons + redirect-back support (already partially there)
-- `src/routes/signup.tsx` — add social buttons + email prefill from search param
-- `src/lib/auth.tsx` — call `claimPendingConsult()` after successful signIn/signUp
-
-**No DB migration needed** — existing `Consults: claim anonymous` RLS policy already supports the claim flow, and the `Prescriptions: owner sees approved` policy already gates result visibility correctly.
+```text
+┌───────────────────────────────────────────┐
+│ Hello, {name}                             │
+│ {email}    [role chips]                   │
+├───────────────────────────────────────────┤
+│ ★ Your prescription is ready              │  ← NEW gold banner
+│   Your practitioner has approved...       │
+│   • Apr 12 consult   [View prescription →]│
+├───────────────────────────────────────────┤
+│ Your consults                  + New      │  ← existing
+│   ...existing list...                     │
+└───────────────────────────────────────────┘
+```
 
 ### Out of scope
-- Email delivery (deferred until domain is ready).
-- Facebook live button (Lovable Cloud doesn't manage it; will appear as "Coming soon" until user opts into Supabase-dashboard setup).
-- Phone/SMS sign-in (not requested).
+- No "mark as read" / dismissal persistence.
+- No notification dot on `site-header` (could be a follow-up).
+- No real-time subscription — page reload reflects new approvals (good enough for v1).
 
