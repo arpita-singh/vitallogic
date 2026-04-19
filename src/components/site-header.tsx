@@ -17,7 +17,8 @@ const navItems = [
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [queueCount, setQueueCount] = useState<number>(0);
-  const { isAuthenticated, hasAnyRole, signOut } = useAuth();
+  const [readyCount, setReadyCount] = useState<number>(0);
+  const { isAuthenticated, hasAnyRole, signOut, user } = useAuth();
   const navigate = useNavigate();
   const isExpert = hasAnyRole(["expert", "admin"]);
 
@@ -48,6 +49,35 @@ export function SiteHeader() {
       void supabase.removeChannel(channel);
     };
   }, [isExpert]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setReadyCount(0);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      // RLS limits this to the patient's own approved prescriptions
+      const { count } = await supabase
+        .from("prescriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "approved");
+      if (!cancelled) setReadyCount(count ?? 0);
+    };
+    void load();
+    const channel = supabase
+      .channel("header-ready-count")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "prescriptions" },
+        () => void load(),
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, user]);
 
   const onSignOut = async () => {
     setOpen(false);
@@ -97,9 +127,17 @@ export function SiteHeader() {
               )}
               <Link
                 to="/account"
-                className="hidden rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
+                className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
               >
                 Account
+                {readyCount > 0 && (
+                  <span
+                    className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background"
+                    aria-label={`${readyCount} prescription${readyCount === 1 ? "" : "s"} ready`}
+                  >
+                    {readyCount}
+                  </span>
+                )}
               </Link>
             </>
           ) : (
@@ -153,9 +191,14 @@ export function SiteHeader() {
               <Link
                 to="/account"
                 onClick={() => setOpen(false)}
-                className="mt-2 rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
+                className="mt-2 flex items-center justify-between rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
               >
-                My account
+                <span>My account</span>
+                {readyCount > 0 && (
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
+                    {readyCount}
+                  </span>
+                )}
               </Link>
               <Link
                 to="/owner-manual"
