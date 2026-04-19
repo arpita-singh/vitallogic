@@ -12,6 +12,7 @@ export type QueueItem = {
   red_flags: string[];
   contactName: string | null;
   contactEmail: string | null;
+  isDraft?: boolean;
 };
 
 function timeAgo(iso: string): string {
@@ -30,6 +31,7 @@ const STATUS_STYLES: Record<string, string> = {
   escalated: "border-destructive/40 bg-destructive/10 text-destructive",
   approved: "border-violet/40 bg-violet/10 text-violet",
   rejected: "border-border bg-muted/30 text-muted-foreground",
+  draft: "border-border bg-muted/30 text-muted-foreground",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -37,28 +39,24 @@ const STATUS_LABELS: Record<string, string> = {
   escalated: "Escalated",
   approved: "Approved",
   rejected: "Rejected",
+  draft: "In progress",
 };
 
 export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }) {
   const escalated = item.status === "escalated";
-  return (
-    <Link
-      to="/expert/$prescriptionId"
-      params={{ prescriptionId: item.id }}
-      className={cn(
-        "block rounded-2xl border bg-surface p-4 transition-colors hover:border-gold/50",
-        escalated ? "border-destructive/40" : "border-border",
-      )}
-    >
+  const statusKey = item.isDraft ? "draft" : item.status;
+
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <span
             className={cn(
               "rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-wider",
-              STATUS_STYLES[item.status] ?? STATUS_STYLES.pending_review,
+              STATUS_STYLES[statusKey] ?? STATUS_STYLES.pending_review,
             )}
           >
-            {STATUS_LABELS[item.status]}
+            {STATUS_LABELS[statusKey]}
           </span>
           {item.red_flags.length > 0 && (
             <span className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
@@ -92,7 +90,9 @@ export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }
 
       <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
         <span className="font-mono">#{item.id.slice(0, 8)}</span>
-        {item.claimed_by ? (
+        {item.isDraft ? (
+          <span className="text-muted-foreground/60">Awaiting recommendation</span>
+        ) : item.claimed_by ? (
           <span
             className={cn(
               "inline-flex items-center gap-1",
@@ -106,6 +106,26 @@ export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }
           <span className="text-muted-foreground/60">Unclaimed</span>
         )}
       </div>
+    </>
+  );
+
+  const cardClass = cn(
+    "block rounded-2xl border bg-surface p-4 transition-colors",
+    escalated ? "border-destructive/40" : "border-border",
+    item.isDraft ? "opacity-90" : "hover:border-gold/50",
+  );
+
+  if (item.isDraft) {
+    return <div className={cardClass}>{inner}</div>;
+  }
+
+  return (
+    <Link
+      to="/expert/$prescriptionId"
+      params={{ prescriptionId: item.id }}
+      className={cardClass}
+    >
+      {inner}
     </Link>
   );
 }
