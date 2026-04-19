@@ -26,6 +26,7 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
 import { Route as ConsultConsultIdResultRouteImport } from './routes/consult.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
+import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert.$prescriptionId'
 
 const UnauthorizedRoute = UnauthorizedRouteImport.update({
   id: '/unauthorized',
@@ -111,6 +112,12 @@ const AuthenticatedExpertExpertRoute =
     path: '/expert',
     getParentRoute: () => AuthenticatedExpertRoute,
   } as any)
+const AuthenticatedExpertExpertPrescriptionIdRoute =
+  AuthenticatedExpertExpertPrescriptionIdRouteImport.update({
+    id: '/$prescriptionId',
+    path: '/$prescriptionId',
+    getParentRoute: () => AuthenticatedExpertExpertRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -126,8 +133,9 @@ export interface FileRoutesByFullPath {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/expert': typeof AuthenticatedExpertExpertRoute
+  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -143,8 +151,9 @@ export interface FileRoutesByTo {
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/expert': typeof AuthenticatedExpertExpertRoute
+  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -163,8 +172,9 @@ export interface FileRoutesById {
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
+  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
+  '/_authenticated/_expert/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
+    | '/expert/$prescriptionId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -201,6 +212,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId'
     | '/expert'
     | '/consult/$consultId/result'
+    | '/expert/$prescriptionId'
   id:
     | '__root__'
     | '/'
@@ -220,6 +232,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId'
     | '/_authenticated/_expert/expert'
     | '/consult/$consultId/result'
+    | '/_authenticated/_expert/expert/$prescriptionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -358,15 +371,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertExpertRouteImport
       parentRoute: typeof AuthenticatedExpertRoute
     }
+    '/_authenticated/_expert/expert/$prescriptionId': {
+      id: '/_authenticated/_expert/expert/$prescriptionId'
+      path: '/$prescriptionId'
+      fullPath: '/expert/$prescriptionId'
+      preLoaderRoute: typeof AuthenticatedExpertExpertPrescriptionIdRouteImport
+      parentRoute: typeof AuthenticatedExpertExpertRoute
+    }
   }
 }
 
+interface AuthenticatedExpertExpertRouteChildren {
+  AuthenticatedExpertExpertPrescriptionIdRoute: typeof AuthenticatedExpertExpertPrescriptionIdRoute
+}
+
+const AuthenticatedExpertExpertRouteChildren: AuthenticatedExpertExpertRouteChildren =
+  {
+    AuthenticatedExpertExpertPrescriptionIdRoute:
+      AuthenticatedExpertExpertPrescriptionIdRoute,
+  }
+
+const AuthenticatedExpertExpertRouteWithChildren =
+  AuthenticatedExpertExpertRoute._addFileChildren(
+    AuthenticatedExpertExpertRouteChildren,
+  )
+
 interface AuthenticatedExpertRouteChildren {
-  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRoute
+  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRouteWithChildren
 }
 
 const AuthenticatedExpertRouteChildren: AuthenticatedExpertRouteChildren = {
-  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRoute,
+  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRouteWithChildren,
 }
 
 const AuthenticatedExpertRouteWithChildren =
