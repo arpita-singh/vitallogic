@@ -5,6 +5,38 @@ import { claimPendingConsult } from "@/lib/claim-consult";
 
 export type AppRole = "user" | "expert" | "admin";
 
+export type ViewMode = "patient" | "expert";
+
+export const VIEW_MODE_KEY = "vl_view_mode";
+
+export function getStoredViewMode(): ViewMode {
+  if (typeof window === "undefined") return "patient";
+  try {
+    const v = window.localStorage.getItem(VIEW_MODE_KEY);
+    if (v === "expert" || v === "patient") return v;
+  } catch {
+    // ignore
+  }
+  return "patient";
+}
+
+export function setStoredViewMode(mode: ViewMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VIEW_MODE_KEY, mode);
+  } catch {
+    // ignore
+  }
+}
+
+export function getPreferredLandingPath(roles: AppRole[]): string {
+  const isExpert = roles.includes("expert") || roles.includes("admin");
+  if (isExpert && getStoredViewMode() === "expert") {
+    return "/expert?filter=pending";
+  }
+  return "/account";
+}
+
 export interface AuthState {
   user: User | null;
   session: Session | null;
