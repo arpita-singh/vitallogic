@@ -1,9 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Sparkles, Clock, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Sparkles, Clock, ShieldAlert, CheckCircle2, BookOpen, Compass, Heart, Sun } from "lucide-react";
+import { toast } from "sonner";
 import { Section, SectionHeader } from "@/components/section";
 import { ModalityBadge, type Modality } from "@/components/consult/modality-badge";
 import { ContactCapture } from "@/components/consult/contact-capture";
+import { ProductCard } from "@/components/consult/product-card";
+import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
@@ -35,33 +38,46 @@ type Rx = {
   draft: RxData;
   final: RxData | null;
   review_notes: string | null;
+  attached_products: AttachedProduct[];
 };
 
 function ResultPage() {
   const { consultId } = Route.useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [rx, setRx] = useState<Rx | null>(null);
   const [hasContact, setHasContact] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [rxRes, consultRes] = await Promise.all([
+      const [rxRes, consultRes, unlockRes] = await Promise.all([
         supabase
           .from("prescriptions")
-          .select("id, status, draft, final, review_notes")
+          .select("id, status, draft, final, review_notes, attached_products")
           .eq("consult_id", consultId)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase.from("consults").select("intake").eq("id", consultId).maybeSingle(),
+        user
+          ? supabase
+              .from("user_purchases")
+              .select("has_unlocked_education")
+              .eq("user_id", user.id)
+              .eq("has_unlocked_education", true)
+              .limit(1)
+          : Promise.resolve({ data: [] as { has_unlocked_education: boolean }[] }),
       ]);
       if (cancelled) return;
       if (rxRes.error) console.error(rxRes.error);
       setRx((rxRes.data as unknown as Rx) ?? null);
       const intake = (consultRes.data?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
+      setUnlocked((unlockRes.data?.length ?? 0) > 0);
       setLoading(false);
     };
     void load();
@@ -80,7 +96,29 @@ function ResultPage() {
       cancelled = true;
       void supabase.removeChannel(channel);
     };
-  }, [consultId]);
+  }, [consultId, user]);
+
+  const handleUnlock = async () => {
+    if (!user) {
+      toast.info("Please sign in to unlock your Owner's Manual.");
+      void navigate({ to: "/login", search: { redirect: `/consult/${consultId}/result` } });
+      return;
+    }
+    setUnlocking(true);
+    const { error } = await supabase.from("user_purchases").insert({
+      user_id: user.id,
+      consult_id: consultId,
+      has_unlocked_education: true,
+    });
+    if (error) {
+      console.error(error);
+      toast.error("Could not unlock right now. Please try again.");
+      setUnlocking(false);
+      return;
+    }
+    toast.success("Unlocked. Welcome to your Owner's Manual.");
+    void navigate({ to: "/owner-manual" });
+  };
 
   if (loading) {
     return (
@@ -179,9 +217,10 @@ function ResultPage() {
 
   // approved
   const data = rx.final ?? rx.draft;
+  const products = (rx.attached_products ?? []) as AttachedProduct[];
   return (
     <Section>
-      <div className="mx-auto max-w-2xl">
+      <div className="mx-auto max-w-3xl">
         <div className="flex items-center gap-2 text-gold">
           <CheckCircle2 className="h-5 w-5" />
           <span className="text-xs uppercase tracking-[0.25em]">Approved by a practitioner</span>
@@ -192,7 +231,28 @@ function ResultPage() {
         <p className="mt-4 text-muted-foreground">{data.summary}</p>
         <div className="divider-gold mt-6" />
 
-        <div className="mt-8 space-y-6">
+        {/* Section 1: Medication cards */}
+        {products.length > 0 && (
+          <section className="mt-10">
+            <div className="flex items-baseline justify-between">
+              <h2 className="font-display text-2xl text-foreground">Your prescribed support</h2>
+              <span className="text-xs uppercase tracking-wider text-gold">
+                {products.length} {products.length === 1 ? "item" : "items"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Certified products selected by your practitioner from our materia medica catalogue.
+            </p>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {products.map((p) => (
+                <ProductCard key={p.product_id} product={p} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Recommendations narrative */}
+        <div className="mt-10 space-y-6">
           {data.recommendations.map((r, i) => (
             <article key={i} className="rounded-2xl border border-border bg-surface p-6">
               <ModalityBadge modality={r.modality} />
@@ -239,11 +299,65 @@ function ResultPage() {
           ))}
         </div>
 
+        {/* Section 2: Owner's Manual unlock */}
+        <section className="mt-12 overflow-hidden rounded-3xl border border-gold/40 bg-gradient-to-br from-gold/10 via-background to-violet/10 p-8 md:p-10">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-5 w-5 text-gold" />
+            <span className="text-xs uppercase tracking-[0.25em] text-gold">Premium</span>
+          </div>
+          <h2 className="mt-4 font-display text-3xl text-foreground md:text-4xl">
+            Unlock your <span className="text-gradient-gold">Owner's Manual</span>
+          </h2>
+          <p className="mt-4 max-w-xl text-base text-muted-foreground md:text-lg">
+            A custom preventative-care guide built from your consult — your unique constitution,
+            mind-body patterns, and the daily habits that keep you in flow.
+          </p>
+
+          <ul className="mt-6 grid gap-3 sm:grid-cols-3">
+            <ManualBullet icon={<Compass className="h-4 w-4 text-gold" />} text="Your unique design" />
+            <ManualBullet icon={<Heart className="h-4 w-4 text-gold" />} text="Mind-body connection" />
+            <ManualBullet icon={<Sun className="h-4 w-4 text-gold" />} text="Preventative habits" />
+          </ul>
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+            {unlocked ? (
+              <Link
+                to="/owner-manual"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                <BookOpen className="h-4 w-4" />
+                Open your Owner's Manual
+              </Link>
+            ) : (
+              <button
+                onClick={handleUnlock}
+                disabled={unlocking}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                <Sparkles className="h-4 w-4" />
+                {unlocking ? "Unlocking…" : "Unlock now — $49"}
+              </button>
+            )}
+            <p className="text-xs text-muted-foreground">
+              One-time. Yours forever. Updated each season.
+            </p>
+          </div>
+        </section>
+
         <p className="mt-10 text-center text-xs text-muted-foreground">
           <Sparkles className="mr-1 inline h-3 w-3 text-gold" />
           AI-drafted, human-audited. Vital Logic doesn't diagnose — for any concerning symptom, please see a clinician.
         </p>
       </div>
     </Section>
+  );
+}
+
+function ManualBullet({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <li className="flex items-center gap-2 rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm text-foreground">
+      {icon}
+      <span>{text}</span>
+    </li>
   );
 }
