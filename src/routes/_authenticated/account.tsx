@@ -12,10 +12,17 @@ export const Route = createFileRoute("/_authenticated/account")({
   component: AccountPage,
 });
 
+type PrescriptionRow = {
+  id: string;
+  status: string;
+  reviewed_at: string | null;
+};
+
 type ConsultRow = {
   id: string;
   status: string;
   created_at: string;
+  prescriptions: PrescriptionRow[] | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -70,7 +77,7 @@ function AccountPage() {
     if (!user) return;
     const { data } = await supabase
       .from("consults")
-      .select("id, status, created_at")
+      .select("id, status, created_at, prescriptions(id, status, reviewed_at)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     setConsults((data ?? []) as ConsultRow[]);
@@ -113,6 +120,62 @@ function AccountPage() {
             ))}
           </div>
         )}
+
+        {/* Approved-prescription banner */}
+        {(() => {
+          const ready = consults.filter((c) =>
+            (c.prescriptions ?? []).some((p) => p.status === "approved"),
+          );
+          if (ready.length === 0) return null;
+          return (
+            <div className="mt-10 rounded-2xl border border-gold/40 bg-gold/5 p-6">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-xl text-gold" aria-hidden>
+                  ★
+                </span>
+                <div className="flex-1">
+                  <h2 className="font-display text-xl text-gradient-gold">
+                    {ready.length === 1
+                      ? "Your prescription is ready"
+                      : `You have ${ready.length} prescriptions ready to view`}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Your practitioner has approved your recommendations.
+                  </p>
+                  <ul className="mt-4 space-y-2">
+                    {ready.map((c) => (
+                      <li
+                        key={c.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/30 bg-background/60 px-4 py-3"
+                      >
+                        <div>
+                          <p className="text-sm text-foreground">
+                            {new Date(c.created_at).toLocaleDateString(undefined, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}{" "}
+                            consult
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            #{c.id.slice(0, 8)}
+                          </p>
+                        </div>
+                        <Link
+                          to="/consult/$consultId/result"
+                          params={{ consultId: c.id }}
+                          className="inline-flex items-center gap-1 rounded-full bg-gold px-4 py-2 text-xs font-medium uppercase tracking-wider text-background transition-opacity hover:opacity-90"
+                        >
+                          View prescription →
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Consults */}
         <div className="mt-10">
