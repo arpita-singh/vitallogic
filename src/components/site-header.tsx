@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Menu, X, Sparkles } from "lucide-react";
+import { Menu, X } from "lucide-react";
+import logo from "@/assets/vital-logic-logo.svg";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -58,9 +59,7 @@ export function SiteHeader() {
     <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4">
         <Link to="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-          <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet to-gold">
-            <Sparkles className="h-4 w-4 text-background" />
-          </div>
+          <img src={logo} alt="Vital Logic" className="h-9 w-9" />
           <span className="font-display text-xl tracking-tight">
             Vital <span className="text-gradient-gold">Logic</span>
           </span>
