@@ -1,8 +1,18 @@
-import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import {
+  Outlet,
+  Link,
+  createRootRouteWithContext,
+  HeadContent,
+  Scripts,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import type { RouterContext } from "@/router";
 
 function NotFoundComponent() {
   return (
@@ -26,7 +36,7 @@ function NotFoundComponent() {
   );
 }
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -42,9 +52,6 @@ export const Route = createRootRoute({
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "Vital Logic — The Amazon of Health" },
       { name: "twitter:title", content: "Vital Logic — The Amazon of Health" },
-      { name: "description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
-      { property: "og:description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
-      { name: "twitter:description", content: "Your Business Blueprint is a mobile-first website designed to implement a business plan." },
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c53f2725-3962-4311-86ab-6784c883a33a/id-preview-cc2b0f47--c76ad899-2e2a-462d-974d-2590aeffe6ea.lovable.app-1776579310511.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c53f2725-3962-4311-86ab-6784c883a33a/id-preview-cc2b0f47--c76ad899-2e2a-462d-974d-2590aeffe6ea.lovable.app-1776579310511.png" },
     ],
@@ -77,14 +84,31 @@ function RootShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+function AuthBridge({ children }: { children: React.ReactNode }) {
+  const auth = useAuth();
+  const router = useRouter();
+
+  // Inject auth into router context so beforeLoad guards see it.
+  useEffect(() => {
+    router.update({ context: { ...router.options.context, auth } });
+    router.invalidate();
+  }, [auth, router]);
+
+  return <>{children}</>;
+}
+
 function RootComponent() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-      <main className="flex-1">
-        <Outlet />
-      </main>
-      <SiteFooter />
-    </div>
+    <AuthProvider>
+      <AuthBridge>
+        <div className="flex min-h-screen flex-col">
+          <SiteHeader />
+          <main className="flex-1">
+            <Outlet />
+          </main>
+          <SiteFooter />
+        </div>
+      </AuthBridge>
+    </AuthProvider>
   );
 }

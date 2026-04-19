@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Menu, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 
 const navItems = [
   { to: "/philosophy", label: "Philosophy" },
@@ -13,6 +14,14 @@ const navItems = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
+  const { isAuthenticated, hasAnyRole, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const onSignOut = async () => {
+    setOpen(false);
+    await signOut();
+    navigate({ to: "/" });
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">
@@ -40,12 +49,31 @@ export function SiteHeader() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            to="/consult"
-            className="hidden rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 sm:inline-flex"
-          >
-            Start consult
-          </Link>
+          {isAuthenticated ? (
+            <>
+              {hasAnyRole(["expert", "admin"]) && (
+                <Link
+                  to="/expert"
+                  className="hidden text-sm text-muted-foreground transition-colors hover:text-gold sm:inline"
+                >
+                  Expert
+                </Link>
+              )}
+              <Link
+                to="/account"
+                className="hidden rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
+              >
+                Account
+              </Link>
+            </>
+          ) : (
+            <Link
+              to="/consult"
+              className="hidden rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 sm:inline-flex"
+            >
+              Start consult
+            </Link>
+          )}
           <button
             onClick={() => setOpen((v) => !v)}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md text-foreground md:hidden"
@@ -60,7 +88,7 @@ export function SiteHeader() {
       <div
         className={cn(
           "overflow-hidden border-t border-border/40 transition-all duration-300 md:hidden",
-          open ? "max-h-[480px]" : "max-h-0",
+          open ? "max-h-[640px]" : "max-h-0",
         )}
       >
         <nav className="flex flex-col gap-1 px-4 py-4">
@@ -75,13 +103,50 @@ export function SiteHeader() {
               {item.label}
             </Link>
           ))}
-          <Link
-            to="/consult"
-            onClick={() => setOpen(false)}
-            className="mt-2 inline-flex items-center justify-center rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
-          >
-            Start free consult
-          </Link>
+
+          {isAuthenticated ? (
+            <>
+              <Link
+                to="/account"
+                onClick={() => setOpen(false)}
+                className="mt-2 rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
+              >
+                My account
+              </Link>
+              {hasAnyRole(["expert", "admin"]) && (
+                <Link
+                  to="/expert"
+                  onClick={() => setOpen(false)}
+                  className="rounded-md px-3 py-3 text-base text-gold hover:bg-surface"
+                >
+                  Expert dashboard
+                </Link>
+              )}
+              <button
+                onClick={onSignOut}
+                className="mt-2 inline-flex items-center justify-center rounded-full border border-border px-4 py-3 text-sm text-muted-foreground"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/consult"
+                onClick={() => setOpen(false)}
+                className="mt-2 inline-flex items-center justify-center rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
+              >
+                Start free consult
+              </Link>
+              <Link
+                to="/login"
+                onClick={() => setOpen(false)}
+                className="mt-1 inline-flex items-center justify-center rounded-full border border-border px-4 py-3 text-sm text-foreground"
+              >
+                Sign in
+              </Link>
+            </>
+          )}
         </nav>
       </div>
     </header>
