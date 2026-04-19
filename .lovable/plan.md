@@ -1,47 +1,60 @@
 
 
-## Plan — Make sign-in obvious + surface prescriptions clearly
+## Plan — View switcher (Patient ⇄ Expert) + clickable prescription notification
 
-The user can't see how to sign in from desktop, and once signed in, finding an approved prescription isn't obvious. Two small, focused fixes — header + homepage.
+The user is an expert who is also a patient. After signing in, the header pushes them toward the Expert area and the gold dot on Account isn't actionable. Three fixes, all UI-only — no DB, no new routes.
 
-### Problem analysis
-
-1. **Desktop header (`site-header.tsx`) has no "Sign in" link** when logged out — only a "Start consult" button. Mobile menu has it; desktop doesn't.
-2. **Homepage CTAs** ("Start your free consult", "Read our philosophy") never mention "I already have a consult — show me my prescription". A returning patient lands on `/` and has no clear path.
-3. **Account page** does have the gold "prescription ready" banner (added last turn), but the user has to *get there* first — which requires knowing to sign in.
+### Problem recap
+1. **No explicit "view mode" switch.** A user with `expert` role + their own consults has no way to toggle between *receiving* prescriptions (patient) and *prescribing* (expert).
+2. **Account dot is decorative.** It shows the count but clicking just opens `/account` — there's no jump to the actual ready prescription.
+3. **Login lands somewhere ambiguous.** Login redirects to `/account`, but the header visually emphasises the Expert link, so dual-role users feel "dropped into expert view".
 
 ### Fixes
 
-**1. `src/components/site-header.tsx` — add desktop Sign in link (logged-out state)**
-- Insert a `Sign in` text link to the left of the "Start consult" button on desktop (`sm:inline-flex`).
-- Style: subtle text link matching the nav items (`text-sm text-muted-foreground hover:text-foreground`), with a small "user" icon optional.
-- Keeps the gold "Start consult" as the primary CTA; "Sign in" is the secondary path for returning users.
-- Mobile menu already has both — no change needed there.
+**1. View-mode toggle in the header (dual-role users only)** — `src/components/site-header.tsx`
+- Add a small segmented control next to the Account button, visible only when `isExpert && isAuthenticated`:
+  ```
+  [ Patient | Expert ]
+  ```
+- State stored in `localStorage` key `vl_view_mode` (`"patient" | "expert"`), default `"patient"` so signing in always lands a dual-role user in their patient view (matches the user's mental model: "I just signed in to see my prescription").
+- Clicking **Patient** → navigates to `/account`, hides the Expert link, shows the Account+ready dot prominently.
+- Clicking **Expert** → navigates to `/expert?filter=pending`, hides patient artefacts (ready dot), shows the queue dot.
+- The toggle persists across reloads. Single-role users (patient-only or expert-only) never see it.
+- Mobile menu gets the same toggle as two large buttons at the top of the auth section.
 
-**2. `src/components/site-header.tsx` — add "My prescription" quick link (logged-in state)**
-- When `isAuthenticated`, the header currently shows `Account` button only. Add a small `Account` link that already covers it, but rename/restructure so the Account button itself feels like the prescription destination — OR simpler: leave Account as-is (the gold banner inside `/account` already surfaces prescriptions prominently). The real fix is making sure the user *gets to* `/account` easily, which the existing button does once they sign in.
-- No change needed here beyond fix #1, since once signed in the Account button is already visible and the dashboard banner does the rest.
+**2. Make the prescription notification actionable** — `src/components/site-header.tsx` + `src/routes/_authenticated/account.tsx`
+- The header dot stays on the Account button (count only).
+- Add `?ready=1` when the dot is clicked → `/account?ready=1`. The account page already renders the gold "Your prescription is ready" banner; when `ready=1` is present, scroll-into-view + brief gold pulse on that banner so it's unmissable.
+- If exactly **one** prescription is ready, clicking the dot deep-links straight to `/consult/{id}/result` instead of `/account`. We already fetch the count via RLS — extend the query to also grab the most recent ready consult id when count === 1, and store both in state.
 
-**3. `src/routes/index.tsx` — add a returning-patient hint near the hero CTAs (logged-out only)**
-- Below the two hero buttons, add a single small line: *"Already had a consult? <Link to='/login'>Sign in to view your prescription</Link>"* — muted text with the link in gold.
-- Only render when not authenticated (use `useAuth()` to check).
-- Zero visual clutter, but makes the path discoverable for the exact case the user described.
-
-**4. `src/routes/index.tsx` — replace the bottom "Begin your first consult" CTA with a dual-path version (logged-out only)**
-- Keep the "Start now" button as primary.
-- Add a secondary link beside/below it: *"Returning? Sign in →"* linking to `/login`.
-- When logged-in, swap the whole block to point to `/account` with copy like *"View your dashboard"* so the same CTA real estate stays useful for returning users.
+**3. Default post-login destination respects view mode** — `src/lib/auth.tsx` + `src/routes/login.tsx` + `src/routes/auth.callback.tsx`
+- After successful sign-in, read `vl_view_mode` from localStorage:
+  - `"expert"` *and* user has expert role → navigate to `/expert?filter=pending`.
+  - Otherwise → `/account` (current behaviour, but now explicit).
+- A `?redirect=` search param still wins over both (so the "Sign in to view your prescription" deep-link from the result page keeps working).
+- First-time login (no stored mode) defaults to `"patient"` view → lands on `/account`.
 
 ### Files
 
-**Modified:**
-- `src/components/site-header.tsx` — add desktop "Sign in" link in the logged-out branch (one new `<Link>`).
-- `src/routes/index.tsx` — import `useAuth`, add a small returning-patient line under hero CTAs, and swap the bottom CTA based on auth state.
+**Modified only — no new files, no DB, no migrations:**
+- `src/components/site-header.tsx` — view-mode toggle (desktop + mobile), conditional Expert/Account rendering based on mode, smarter notification dot link (deep-link when count === 1), extend the ready-prescriptions query to also return the latest ready consult id.
+- `src/routes/_authenticated/account.tsx` — read `?ready=1` search param, scroll the gold banner into view + add a one-shot `animate-pulse` highlight when present.
+- `src/lib/auth.tsx` — small helper `getPreferredLandingPath(roles)` that reads `vl_view_mode` and returns `/expert?filter=pending` or `/account`. Used by `signIn`/`signUp`.
+- `src/routes/login.tsx` — use the helper for post-signin navigation when no `?redirect=` is provided.
+- `src/routes/auth.callback.tsx` — same helper for the OAuth landing.
 
-**No new files. No DB changes. No route changes.**
+### Visual sketch (desktop header, dual-role user)
+
+```text
+Logo  ...nav...        [Patient|Expert]   Account ●3
+                       └ toggle ─┘        └ clickable dot
+```
+
+When the user clicks `Expert` the toggle stores `expert`, the patient dot disappears, and a gold queue badge appears on a re-shown `Expert` link. When they click `Patient`, the Expert link hides and Account + ready dot return.
 
 ### Out of scope
-- No header redesign / no dropdown menu (overkill for two links).
-- No "prescription ready" notification dot on the header (mentioned as a follow-up suggestion last turn — separate task if wanted).
-- No copy changes to login/signup pages themselves (they already work; the issue is discoverability, not the pages).
+- No "expert can act as a patient on their own consults" workflow change — RLS already permits both; this is purely a navigation/affordance fix.
+- No persistence of view mode in the database; localStorage is enough for a per-device preference.
+- No redesign of the Expert dashboard or Account page beyond the small ready-banner highlight.
+- No `viewed_at` tracking (still a deferred follow-up).
 
