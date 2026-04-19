@@ -15,6 +15,7 @@ import { ChatMessage } from "@/components/consult/chat-message";
 import { RecommendationEditor, type RxData } from "@/components/expert/recommendation-editor";
 import { AuditTrail, type AuditEntry } from "@/components/expert/audit-trail";
 import { ProductPicker, type AttachedProduct } from "@/components/expert/product-picker";
+import { PrescriptionReviewModal } from "@/components/expert/prescription-review-modal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import type { Intake } from "@/lib/consult-server";
@@ -63,6 +64,7 @@ function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
     const { data: p, error: pErr } = await supabase
@@ -206,7 +208,8 @@ function ReviewPage() {
       await writeAudit("attach_products", { added, removed });
     }
 
-    toast.success("Approved and sent.");
+    setReviewOpen(false);
+    toast.success("Approved — patient will see this on sign-in.");
     navigate({ to: "/expert", search: { filter: "pending" } });
   };
 
