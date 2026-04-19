@@ -7,7 +7,7 @@ import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
-export const Route = createFileRoute("/consult/$consultId/result")({
+export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
     meta: [{ title: "Your recommendation — Vital Logic" }],
   }),
