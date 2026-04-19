@@ -235,41 +235,59 @@ export const claimConsult = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
-    // Prefer token-verified claim — strongest proof of ownership.
-    if (data.anonToken) {
-      const { data: row } = await supabaseAdmin
-        .from("consults")
-        .select("anon_token_hash, user_id")
-        .eq("id", data.consultId)
-        .maybeSingle();
-      if (
-        row &&
-        row.user_id === null &&
-        row.anon_token_hash &&
-        hashToken(data.anonToken) === row.anon_token_hash
-      ) {
-        const { error } = await supabaseAdmin
-          .from("consults")
-          .update({ user_id: userId })
-          .eq("id", data.consultId)
-          .is("user_id", null);
-        if (error) {
-          console.error("claimConsult (token) failed", error);
-          return { ok: false };
-        }
-        return { ok: true };
+    // Load the consult once. We need its anon_token_hash and intake to decide
+    // whether the caller is allowed to claim it.
+    const { data: row } = await supabaseAdmin
+      .from("consults")
+      .select("anon_token_hash, user_id, intake")
+      .eq("id", data.consultId)
+      .maybeSingle();
+
+    if (!row) return { ok: false };
+    // Already owned — nothing to claim. (If owned by caller, treat as success.)
+    if (row.user_id) return { ok: row.user_id === userId };
+
+    // Path 1: token-verified claim (strongest proof of ownership).
+    const tokenMatches =
+      !!data.anonToken &&
+      !!row.anon_token_hash &&
+      hashToken(data.anonToken) === row.anon_token_hash;
+
+    // Path 2: verified-email recovery. Only allow when the consult's
+    // contactEmail matches the JWT's verified email. This preserves the
+    // "I lost my browser token but signed up with the same email" flow
+    // without enabling UUID-based hijack.
+    let emailMatches = false;
+    if (!tokenMatches) {
+      const intake = (row.intake as Record<string, unknown> | null) ?? null;
+      const contactEmail =
+        typeof intake?.contactEmail === "string"
+          ? (intake.contactEmail as string).trim().toLowerCase()
+          : null;
+      if (contactEmail) {
+        const { data: userRes } = await supabaseAdmin.auth.admin.getUserById(userId);
+        const verifiedEmail = userRes?.user?.email?.trim().toLowerCase() ?? null;
+        const isEmailVerified = !!userRes?.user?.email_confirmed_at;
+        emailMatches =
+          isEmailVerified && !!verifiedEmail && verifiedEmail === contactEmail;
       }
     }
 
-    // Fallback: claim only if the consult is still unowned. RLS already
-    // restricts UPDATE to (user_id IS NULL) for the authenticated role.
+    if (!tokenMatches && !emailMatches) {
+      console.warn("claimConsult denied: no token or email match", {
+        consultId: data.consultId,
+        userId,
+      });
+      return { ok: false };
+    }
+
     const { error } = await supabaseAdmin
       .from("consults")
       .update({ user_id: userId })
       .eq("id", data.consultId)
       .is("user_id", null);
     if (error) {
-      console.error("claimConsult (fallback) failed", error);
+      console.error("claimConsult update failed", error);
       return { ok: false };
     }
     return { ok: true };
