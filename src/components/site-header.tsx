@@ -17,7 +17,8 @@ const navItems = [
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [queueCount, setQueueCount] = useState<number>(0);
-  const { isAuthenticated, hasAnyRole, signOut } = useAuth();
+  const [readyCount, setReadyCount] = useState<number>(0);
+  const { isAuthenticated, hasAnyRole, signOut, user } = useAuth();
   const navigate = useNavigate();
   const isExpert = hasAnyRole(["expert", "admin"]);
 
@@ -48,6 +49,35 @@ export function SiteHeader() {
       void supabase.removeChannel(channel);
     };
   }, [isExpert]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setReadyCount(0);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      // RLS limits this to the patient's own approved prescriptions
+      const { count } = await supabase
+        .from("prescriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "approved");
+      if (!cancelled) setReadyCount(count ?? 0);
+    };
+    void load();
+    const channel = supabase
+      .channel("header-ready-count")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "prescriptions" },
+        () => void load(),
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, user]);
 
   const onSignOut = async () => {
     setOpen(false);
