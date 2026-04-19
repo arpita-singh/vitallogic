@@ -296,6 +296,77 @@ export function IntakeStepper({
             </div>
           </div>
         )}
+
+        {step === 5 && (
+          <div>
+            <h3 className="font-display text-2xl text-foreground md:text-3xl">
+              How should we reach you?
+            </h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {signedIn
+                ? "We've prefilled your account details. Edit if you'd prefer a different inbox for this consult."
+                : "Your reviewing practitioner will email you when your recommendation is ready. We'll never share this."}
+            </p>
+            <div className="mt-5 space-y-4">
+              <div>
+                <label
+                  htmlFor="contact-name"
+                  className="text-sm uppercase tracking-wider text-muted-foreground"
+                >
+                  Your name <span className="text-muted-foreground/60">(optional)</span>
+                </label>
+                <input
+                  id="contact-name"
+                  type="text"
+                  value={intake.contactName ?? ""}
+                  onChange={(e) =>
+                    setIntake((s) => ({ ...s, contactName: e.target.value }))
+                  }
+                  placeholder="First name or how we should address you"
+                  maxLength={100}
+                  className="mt-2 w-full rounded-xl border border-border bg-background p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-gold focus:outline-none"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="contact-email"
+                  className="text-sm uppercase tracking-wider text-muted-foreground"
+                >
+                  Email <span className="text-gold">*</span>
+                </label>
+                <div className="relative mt-2">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="contact-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={intake.contactEmail ?? ""}
+                    onChange={(e) =>
+                      setIntake((s) => ({ ...s, contactEmail: e.target.value }))
+                    }
+                    placeholder="you@example.com"
+                    maxLength={255}
+                    className={cn(
+                      "w-full rounded-xl border bg-background p-3 pl-9 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none",
+                      emailValid || !(intake.contactEmail ?? "").length
+                        ? "border-border focus:border-gold"
+                        : "border-destructive/60 focus:border-destructive",
+                    )}
+                  />
+                </div>
+                {!emailValid && (intake.contactEmail ?? "").length > 0 && (
+                  <p className="mt-1.5 text-xs text-destructive">
+                    Please enter a valid email address.
+                  </p>
+                )}
+              </div>
+              <p className="rounded-xl border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground">
+                Used only to deliver your reviewed recommendation. No marketing, ever.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Nav */}
