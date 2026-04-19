@@ -149,6 +149,13 @@ export function SiteHeader() {
               >
                 My account
               </Link>
+              <Link
+                to="/owner-manual"
+                onClick={() => setOpen(false)}
+                className="rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
+              >
+                Owner's Manual
+              </Link>
               {isExpert && (
                 <Link
                   to="/expert"
