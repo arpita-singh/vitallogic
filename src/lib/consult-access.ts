@@ -7,21 +7,38 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Json = Record<string, unknown>;
 
+/**
+ * Thrown when the edge function (or the auth server it consults) reports the
+ * caller's access token is no longer valid. Callers can catch this to clear
+ * the stale local session instead of treating it as an "ownership denied".
+ */
+export class StaleSessionError extends Error {
+  constructor(message = "Stale session") {
+    super(message);
+    this.name = "StaleSessionError";
+  }
+}
+
 async function call<T = Json>(body: Json): Promise<T> {
   const { data, error } = await supabase.functions.invoke("consult-access", { body });
   if (error) {
     // The Functions client throws a generic FunctionsHttpError for non-2xx.
-    // Try to surface the server's error message if present.
+    // Try to surface the server's error message + status if present.
     let message = error.message || "Request failed";
+    let status: number | undefined;
     try {
       const ctx = (error as unknown as { context?: Response }).context;
-      if (ctx && typeof (ctx as Response).json === "function") {
-        const parsed = (await (ctx as Response).json()) as { error?: string } | undefined;
-        if (parsed?.error) message = parsed.error;
+      if (ctx) {
+        status = (ctx as Response).status;
+        if (typeof (ctx as Response).json === "function") {
+          const parsed = (await (ctx as Response).json()) as { error?: string } | undefined;
+          if (parsed?.error) message = parsed.error;
+        }
       }
     } catch {
       /* ignore */
     }
+    if (status === 401) throw new StaleSessionError(message);
     throw new Error(message);
   }
   return data as T;

@@ -10,7 +10,7 @@ import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
-import { readConsult, unlockEducationRequest } from "@/lib/consult-access";
+import { readConsult, unlockEducationRequest, StaleSessionError } from "@/lib/consult-access";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
@@ -70,9 +70,19 @@ function ResultPage() {
         if (cancelled) return;
         consultRow = (res.consult as ConsultRow | null) ?? null;
       } catch (e) {
-        // Unauthorized or not-found — keep consultRow null and let the
-        // auth gate below handle prompting the user to sign in.
-        console.warn("readConsult denied", e);
+        // 401 from the edge function while the client thinks it's signed in
+        // means the access token has been revoked server-side. Wipe local
+        // storage so the UI reverts to a clean "signed out" state — the
+        // gate below will then prompt the user to sign back in.
+        if (e instanceof StaleSessionError && user) {
+          console.warn("Stale session on readConsult; signing out locally");
+          await supabase.auth.signOut({ scope: "local" });
+          if (cancelled) return;
+        } else {
+          // Unauthorized or not-found — keep consultRow null and let the
+          // auth gate below handle prompting the user to sign in.
+          console.warn("readConsult denied", e);
+        }
       }
 
       // Prescriptions remain readable to the owner via the existing RLS

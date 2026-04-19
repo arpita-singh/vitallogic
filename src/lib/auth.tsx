@@ -100,11 +100,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // 2) Then read existing session
-    supabase.auth.getSession().then(({ data: { session: existing } }) => {
+    // 2) Then read existing session AND validate it server-side. getSession()
+    // returns whatever is in localStorage without revalidating; if the server
+    // has revoked the session (or the refresh token expired) the client would
+    // otherwise stay "logged in" forever and every authed request would 401.
+    // getUser() round-trips to the auth server and returns null on a stale
+    // token — at which point we wipe local storage to match reality.
+    supabase.auth.getSession().then(async ({ data: { session: existing } }) => {
       setSession(existing);
       setUser(existing?.user ?? null);
       if (existing?.user) {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes?.user) {
+          // Session is dead on the server. Clear local storage so the UI
+          // correctly reflects "signed out". onAuthStateChange will fire
+          // SIGNED_OUT and reset roles/user via the subscription above.
+          console.warn("Stale session detected on init; signing out locally", userErr);
+          await supabase.auth.signOut({ scope: "local" });
+          if (!initialized) {
+            initialized = true;
+            setLoading(false);
+          }
+          return;
+        }
         fetchRoles(existing.user.id).then((r) => {
           setRoles(r);
           if (!initialized) {
