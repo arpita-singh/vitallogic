@@ -97,6 +97,10 @@ function LoginPage() {
           </button>
         </form>
 
+        <div className="mt-6">
+          <SocialAuthButtons redirectTo={search.redirect} />
+        </div>
+
         <p className="mt-6 text-center text-sm text-muted-foreground">
           New here?{" "}
           <Link to="/signup" className="text-gold hover:underline">
