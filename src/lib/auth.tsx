@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { claimPendingConsult } from "@/lib/claim-consult";
 
 export type AppRole = "user" | "expert" | "admin";
 
@@ -97,12 +98,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasRole: (role) => roles.includes(role),
       hasAnyRole: (rs) => rs.some((r) => roles.includes(r)),
       signIn: async (email, password) => {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (!error && data.user) {
+          await claimPendingConsult(data.user.id);
+        }
         return { error };
       },
       signUp: async (email, password, displayName) => {
-        const redirectUrl = `${window.location.origin}/`;
-        const { error } = await supabase.auth.signUp({
+        const redirectUrl = `${window.location.origin}/auth/callback`;
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -110,6 +114,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             data: { display_name: displayName },
           },
         });
+        if (!error && data.user) {
+          await claimPendingConsult(data.user.id);
+        }
         return { error };
       },
       signOut: async () => {
