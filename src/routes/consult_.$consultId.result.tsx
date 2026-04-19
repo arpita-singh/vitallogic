@@ -51,6 +51,8 @@ function ResultPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [consultOwnerId, setConsultOwnerId] = useState<string | null | undefined>(undefined);
+  const [intakeEmail, setIntakeEmail] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
