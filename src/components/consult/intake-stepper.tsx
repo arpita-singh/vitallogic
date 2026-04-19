@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Mail } from "lucide-react";
 import type { Intake } from "@/lib/consult-server";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const SYMPTOMS = [
   "Headache",
@@ -30,9 +32,15 @@ const GOALS = [
 export function IntakeStepper({
   onComplete,
   submitting,
+  initialContactEmail,
+  initialContactName,
+  signedIn,
 }: {
   onComplete: (intake: Intake) => void;
   submitting?: boolean;
+  initialContactEmail?: string;
+  initialContactName?: string;
+  signedIn?: boolean;
 }) {
   const [step, setStep] = useState(0);
   const [intake, setIntake] = useState<Intake>({
@@ -49,9 +57,11 @@ export function IntakeStepper({
     pregnancy: "na",
     under18: false,
     goals: [],
+    contactEmail: initialContactEmail ?? "",
+    contactName: initialContactName ?? "",
   });
 
-  const total = 5;
+  const total = 6;
   const progress = ((step + 1) / total) * 100;
 
   const toggleArr = (key: "symptoms" | "goals", v: string) => {
@@ -61,10 +71,13 @@ export function IntakeStepper({
     });
   };
 
+  const emailValid = EMAIL_RE.test((intake.contactEmail ?? "").trim());
+
   const canNext = (() => {
     if (step === 0) return intake.symptoms.length > 0 || (intake.symptomsNote ?? "").length > 5;
     if (step === 1) return !!intake.duration;
     if (step === 4) return intake.goals.length > 0;
+    if (step === 5) return emailValid;
     return true;
   })();
 
