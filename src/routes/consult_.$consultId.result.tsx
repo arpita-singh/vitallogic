@@ -185,31 +185,18 @@ function ResultPage() {
     );
   }
 
-  // Gate: anonymous consult OR signed-in user who doesn't own this consult
-  // → attempt self-healing claim first; otherwise show the auth gate.
+  // Gate: signed-in user who doesn't own this consult, OR anonymous viewer
+  // who isn't the original browser. The self-healing claim now runs from a
+  // useEffect (above) — never from render — so we don't loop.
   const isOwner = user && consultOwnerId && user.id === consultOwnerId;
   const needsAuth = !isOwner;
   if (needsAuth) {
-    // Self-healing: signed-in user landing on an unclaimed consult.
-    // Try the claim if (a) it matches a remembered pending id, OR
-    // (b) the intake email matches the signed-in user's email.
-    // RLS still restricts the UPDATE to rows where user_id IS NULL, so this is safe.
-    if (user && consultOwnerId === null) {
-      const pending = getPendingConsultId();
-      const emailMatches =
-        !!intakeEmail &&
-        !!user.email &&
-        intakeEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
-      if (pending === consultId || emailMatches) {
-        void claimSpecificConsult(user.id, consultId).then((ok) => {
-          if (ok) setConsultOwnerId(user.id);
-        });
-        return (
-          <Section>
-            <p className="text-center text-muted-foreground">Linking your consult to your account…</p>
-          </Section>
-        );
-      }
+    if (claiming) {
+      return (
+        <Section>
+          <p className="text-center text-muted-foreground">Linking your consult to your account…</p>
+        </Section>
+      );
     }
     rememberPendingConsult(consultId);
     const redirectPath = `/consult/${consultId}/result`;
