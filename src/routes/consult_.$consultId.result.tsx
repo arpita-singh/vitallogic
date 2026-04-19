@@ -60,13 +60,14 @@ function ResultPage() {
     const load = async () => {
       // Use the secure server function for the consult + intake (anonymous
       // intake data is no longer publicly readable via RLS).
-      let consultRow: { intake?: { contactEmail?: string }; user_id?: string | null } | null = null;
+      type ConsultRow = { intake?: { contactEmail?: string }; user_id?: string | null };
+      let consultRow: ConsultRow | null = null;
       try {
         const res = await getConsult({
           data: { consultId, anonToken: getAnonTokenFor(consultId) },
         });
         if (cancelled) return;
-        consultRow = (res.consult as typeof consultRow) ?? null;
+        consultRow = (res.consult as ConsultRow | null) ?? null;
       } catch (e) {
         // Unauthorized or not-found — keep consultRow null and let the
         // auth gate below handle prompting the user to sign in.
