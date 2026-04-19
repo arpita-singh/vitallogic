@@ -9,7 +9,8 @@ import { ProductCard } from "@/components/consult/product-card";
 import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { rememberPendingConsult, claimSpecificConsult, getPendingConsult } from "@/lib/claim-consult";
+import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
+import { getConsult } from "@/lib/consult-server";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
@@ -57,16 +58,30 @@ function ResultPage() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [rxRes, consultRes, unlockRes] = await Promise.all([
-        // Fetch ALL prescriptions for this consult; we resolve patient-facing
-        // priority client-side: approved > rejected > escalated > pending_review.
-        // This ensures an older approved Rx wins over a newer pending draft.
+      // Use the secure server function for the consult + intake (anonymous
+      // intake data is no longer publicly readable via RLS).
+      let consultRow: { intake?: { contactEmail?: string }; user_id?: string | null } | null = null;
+      try {
+        const res = await getConsult({
+          data: { consultId, anonToken: getAnonTokenFor(consultId) },
+        });
+        if (cancelled) return;
+        consultRow = (res.consult as typeof consultRow) ?? null;
+      } catch (e) {
+        // Unauthorized or not-found — keep consultRow null and let the
+        // auth gate below handle prompting the user to sign in.
+        console.warn("getConsult denied", e);
+      }
+
+      // Prescriptions remain readable to the owner via the existing RLS
+      // policy (Prescriptions: owner sees approved). For non-owners we just
+      // fall through to the auth gate.
+      const [rxRes, unlockRes] = await Promise.all([
         supabase
           .from("prescriptions")
           .select("id, status, draft, final, review_notes, attached_products, created_at")
           .eq("consult_id", consultId)
           .order("created_at", { ascending: false }),
-        supabase.from("consults").select("intake, user_id").eq("id", consultId).maybeSingle(),
         user
           ? supabase
               .from("user_purchases")
@@ -90,7 +105,6 @@ function ResultPage() {
         }
       }
       setRx(chosen);
-      const consultRow = consultRes.data as { intake?: { contactEmail?: string }; user_id?: string | null } | null;
       const intake = (consultRow?.intake ?? {}) as { contactEmail?: string };
       setHasContact(Boolean(intake.contactEmail));
       setIntakeEmail(intake.contactEmail);
@@ -156,7 +170,7 @@ function ResultPage() {
     // (b) the intake email matches the signed-in user's email.
     // RLS still restricts the UPDATE to rows where user_id IS NULL, so this is safe.
     if (user && consultOwnerId === null) {
-      const pending = getPendingConsult();
+      const pending = getPendingConsultId();
       const emailMatches =
         !!intakeEmail &&
         !!user.email &&
