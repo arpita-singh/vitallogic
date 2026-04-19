@@ -1,103 +1,90 @@
 
 
-## Plan — Vital Logic v2.0 (Pillars 3 & 4)
+## Plan — Pre-flight prescription edit + email delivery
 
-Building the marketplace foundation + premium education unlock. Four steps, sequenced so backend exists before UI consumes it.
-
----
-
-### Step 1 — Database (migration)
-
-Two new tables with RLS using existing `has_role()` + `user_roles` pattern.
-
-**`certified_materia_medica`** (marketplace inventory)
-- `id` uuid PK, `product_name` text, `category` text (free-form for now — Ayurveda / Naturopathy / Indigenous / etc.), `aust_l_number` text, `price` numeric(10,2), `stock_status` boolean default true, `vendor_name` text, `description` text (small extra — needed for product cards), `created_at`, `updated_at`.
-- RLS: SELECT for everyone (public catalog); INSERT/UPDATE/DELETE only for `admin` or `expert` (so experts can manage their own catalog if needed; admins always).
-- Seed ~6 demo products covering all three categories so the UI has something to show immediately.
-
-**`user_purchases`** (payment ledger placeholder)
-- `id` uuid PK, `user_id` uuid not null, `consult_id` uuid (nullable — education unlock can be per-consult or account-wide), `has_unlocked_education` boolean default false, `purchased_medications` jsonb default `'[]'`, `created_at`, `updated_at`.
-- RLS: owner-only SELECT/INSERT/UPDATE (`auth.uid() = user_id`); experts/admins can SELECT for support.
-
-**Schema-level addition to `prescriptions`:** add `attached_products` jsonb column (default `'[]'`) on the existing `prescriptions` table to hold the array of selected marketplace products `{product_id, product_name, dosage_notes}`. This is the cleanest way to attach products without disturbing the existing `draft`/`final` JSON shape.
+The user wants two things before approving sends a prescription to the patient:
+1. **A focused "edit & finalise" module** — the existing right-column editor is fine for inline tweaks, but there's no clear "review what the patient will actually see" moment before hitting Approve.
+2. **Email the approved prescription to the patient** — currently Approve just flips the status; the patient only finds out by reloading their result page.
 
 ---
 
-### Step 2 — Expert UI: product attachment
+### Step 1 — Email infrastructure (prerequisite)
 
-File: `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (note the `_` suffix — the renamed file from earlier this session).
+The project has zero email setup today (no `src/lib/email-templates/`, no email server routes, no email domain). To send emails from the app we need a verified sender domain first.
 
-- Add a new "Attach marketplace products" panel inside the editor card, above the existing approve/reject buttons.
-- New component `src/components/expert/product-picker.tsx`:
-  - shadcn `Command` + `Popover` combobox, pulls from `certified_materia_medica` where `stock_status = true`.
-  - Searchable by `product_name`, grouped by `category` (CommandGroup per category).
-  - Each result shows: product name, AUST-L number badge, price, vendor (small/muted).
-  - Selected products render as chip rows below with: name, optional dosage-notes input, remove button.
-- On approve, the chosen products are written to `prescriptions.attached_products` AND a new audit row is inserted into `prescription_audit` with `action: "attach_products"` and `diff: { added: [...], removed: [...] }` so the existing audit trail captures the change. The existing approve flow is preserved verbatim — products are an additive sidecar.
-- `audit-trail.tsx` already renders unknown actions generically; no change needed there.
-
----
-
-### Step 3 — Patient result UI
-
-File: `src/routes/consult_.$consultId.result.tsx`.
-
-Two new sections rendered only when `rx.status === "approved"`:
-
-**Section 1 — Medication cards** (above the existing rationale list, or directly under the "Approved" header — leaning under the summary so the prescribed products feel like the primary deliverable).
-- New component `src/components/consult/product-card.tsx`.
-- Grid: 1 col mobile, 2 col `md:`. Each card uses our surface tokens (`bg-surface`, `border-border`, gold accent on category badge).
-- Card content: category chip, product name (display font), AUST-L line (`text-xs text-muted-foreground`), vendor, price in gold, expert's dosage notes if present, primary "Purchase medication" button (placeholder — `onClick` shows a `sonner` toast "Checkout coming soon").
-- If `attached_products` is empty, the section is omitted.
-
-**Section 2 — "Unlock Your Owner's Manual"** (below the rationale + safety + citations block).
-- Full-width premium card. Background: subtle gold→violet gradient (`bg-gradient-to-br from-gold/10 via-background to-violet/10`), thicker gold border (`border-gold/40`), large display headline.
-- Copy: "Unlock your Owner's Manual" + subtitle "A custom preventative-care guide built from your consult — your unique constitution, mind-body patterns, and the daily habits that keep you in flow."
-- Visual flourish: small lotus mark + 3 micro-bullets ("Your unique design", "Mind-body connection", "Preventative habits").
-- Primary CTA: "Unlock now — $X" (placeholder price). On click: insert/upsert into `user_purchases` with `has_unlocked_education = true` (placeholder for real Stripe), then navigate to `/owner-manual`. Show a toast confirmation.
-- If the user already has `has_unlocked_education = true`, swap CTA to "Open your Owner's Manual" linking to `/owner-manual`.
+I'll surface the Lovable email setup dialog so the user can configure a sender domain. Once that's done (status `awaiting_dns` is fine — we don't need full DNS verification to scaffold/code), I'll:
+- run `setup_email_infra` to provision queues + tables + cron
+- run `scaffold_transactional_email` to create the send route + template registry
+- create `src/lib/email-templates/prescription-approved.tsx` — a React Email template that renders:
+  - greeting with the patient's name
+  - practitioner summary
+  - each recommendation (title, modality, rationale, safety notes)
+  - attached marketplace products (name, vendor, AUST‑L, price, dosage notes)
+  - reviewer notes (if any)
+  - a "View your full recommendation" button linking to `/consult/{id}/result`
+  - matches Sunny Goth palette (gold accent on white body — required by email rules)
 
 ---
 
-### Step 4 — Owner's Manual route
+### Step 2 — Prescription review modal (pre-send)
 
-New file: `src/routes/_authenticated/owner-manual.tsx` (sits under existing `_authenticated` guard so unauth users bounce to login).
+New component `src/components/expert/prescription-review-modal.tsx`:
+- shadcn `Dialog` triggered by a new "Review & send to patient" button (replaces the current bare "Approve" button).
+- Renders the **exact patient-facing layout** using the in-memory `edit` + `attachedProducts` state (so the expert sees what the patient will see, including products and reviewer notes), wrapped in a "Patient preview" frame.
+- Below the preview, a recipient block:
+  - shows resolved patient email (from `consult.intake.contactEmail` or the consult owner's profile email)
+  - editable input if the email is missing or wrong
+  - a "Send copy to me as well" checkbox (sends to the reviewing expert too)
+- Footer actions: `Back to edit` (close) and `Approve & send` (primary).
 
-- On mount, query `user_purchases` for current user, find max `has_unlocked_education`.
-- **Locked state**: centered card with a faded lotus icon, copy "Your Owner's Manual is locked. Complete a consult and unlock to receive your personalised preventative-care guide.", primary button → `/consult`, secondary → back home.
-- **Unlocked state**: hero with user's display_name from profile ("Your Owner's Manual, {name}"), then 3 sections rendered as styled cards in a single column with generous spacing:
-  1. **Your Unique Design** — placeholder paragraphs about constitutional type.
-  2. **Mind-Body Connection** — placeholder paragraphs about stress/sleep/digestion patterns.
-  3. **Preventative Habits** — placeholder daily/weekly/seasonal practice list.
-- Each section: gold uppercase eyebrow, display-font heading, body copy in `text-foreground/90`, divider between sections.
-- Add the route to the header user menu (small addition to `site-header.tsx`'s authenticated dropdown if there is one — otherwise skip; will check during implementation).
+The existing inline editor stays — this modal is the final gate, not a replacement.
 
 ---
 
-### Cross-cutting
+### Step 3 — Wire approve → send email
 
-- All new tables get `update_updated_at_column()` trigger using the existing function.
-- Realtime is NOT enabled on the new tables (not needed — patient page already reloads on prescription updates, which now include `attached_products`).
-- Toasts via existing `sonner` setup.
-- No new npm dependencies; combobox uses already-installed shadcn `Command` + `Popover`.
-- Visual language stays "Sunny Goth": violet `#7C3AED`, gold `#F4C151`, surface tokens already in `styles.css`.
-- Audit trail integrity: every approve that includes products writes BOTH the existing approval audit row AND a new `attach_products` row, in a single transaction client-side (sequential inserts; if the second fails the approval still stands but a console error surfaces — acceptable for placeholder phase).
+Update `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`:
+- Replace the current Approve button with `Review & send to patient` opening the modal.
+- The modal's `Approve & send` runs the existing approve mutation (status, final, attached_products, reviewed_*, audit), then calls a small client helper `sendPrescriptionEmail({ prescriptionId, recipientEmail, ccExpert })` which POSTs to the `send-transactional-email` server route with:
+  - `templateName: "prescription-approved"`
+  - `recipientEmail`
+  - `idempotencyKey: prescription-approved-${prescriptionId}`
+  - `templateData: { patientName, summary, recommendations, products, reviewNotes, resultUrl }`
+- After enqueueing, write a new `prescription_audit` row `action: "email_sent"` with `diff: { recipient, ccExpert }` so the audit trail captures it.
+- Toast `Approved and emailed to {patient}` on success; `Approved (email failed — try resend)` if the enqueue fails (the approval still stands — failures are non-blocking).
 
-### Files touched
+A small "Resend email" button appears on already-approved prescriptions in case the first send failed or the patient lost it.
+
+---
+
+### Step 4 — Public unsubscribe page
+
+Required by the transactional-email scaffolding: `src/routes/unsubscribe.tsx` reads the `?token=` param and renders a branded confirm/success/already-done state, calling the scaffolded `/email/unsubscribe` endpoints.
+
+---
+
+### Files
+
 **New:**
-- migration SQL (2 tables + `prescriptions.attached_products` column + RLS + seed)
-- `src/components/expert/product-picker.tsx`
-- `src/components/consult/product-card.tsx`
-- `src/routes/_authenticated/owner-manual.tsx`
+- `src/components/expert/prescription-review-modal.tsx`
+- `src/lib/email-templates/prescription-approved.tsx`
+- `src/lib/email/send.ts` (thin helper for the send route)
+- `src/routes/unsubscribe.tsx`
+- (auto-created by scaffolding tool) `src/routes/lovable/email/...` server routes + `src/lib/email-templates/registry.ts`
 
 **Modified:**
-- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`
-- `src/routes/consult_.$consultId.result.tsx`
-- `src/components/site-header.tsx` (only if an auth menu exists — small link addition)
+- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (swap Approve → modal trigger; add resend button on resolved state)
 
-### Out of scope (explicit)
-- Real Stripe checkout — placeholder buttons + toasts only.
-- Actual AI-generated owner's-manual content — placeholders only.
-- Inventory management UI for admins — not requested.
-- Email notifications on purchase — not requested.
+**No DB migration needed** — `prescription_audit` already supports the new `email_sent` action via free-form `action` text.
+
+### Out of scope
+- No SMS / no in-app notification.
+- No rich PDF attachment (Lovable email infra doesn't support attachments — the email links back to the result page, which already renders the full prescription).
+- No marketing/newsletter tooling.
+
+The first step is configuring an email sender domain — that's a one-time setup. Once that's in place, everything above can be built and tested.
+
+<lov-actions>
+<lov-open-email-setup>Set up email domain</lov-open-email-setup>
+</lov-actions>
 
