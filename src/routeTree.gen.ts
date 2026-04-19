@@ -21,8 +21,10 @@ import { Route as IntegrityRouteImport } from './routes/integrity'
 import { Route as ConsultRouteImport } from './routes/consult'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ConsultConsultIdRouteImport } from './routes/consult.$consultId'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
+import { Route as ConsultConsultIdResultRouteImport } from './routes/consult.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
 
 const UnauthorizedRoute = UnauthorizedRouteImport.update({
@@ -84,6 +86,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConsultConsultIdRoute = ConsultConsultIdRouteImport.update({
+  id: '/$consultId',
+  path: '/$consultId',
+  getParentRoute: () => ConsultRoute,
+} as any)
 const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   id: '/account',
   path: '/account',
@@ -92,6 +99,11 @@ const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
 const AuthenticatedExpertRoute = AuthenticatedExpertRouteImport.update({
   id: '/_expert',
   getParentRoute: () => AuthenticatedRoute,
+} as any)
+const ConsultConsultIdResultRoute = ConsultConsultIdResultRouteImport.update({
+  id: '/result',
+  path: '/result',
+  getParentRoute: () => ConsultConsultIdRoute,
 } as any)
 const AuthenticatedExpertExpertRoute =
   AuthenticatedExpertExpertRouteImport.update({
@@ -102,7 +114,7 @@ const AuthenticatedExpertExpertRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/consult': typeof ConsultRoute
+  '/consult': typeof ConsultRouteWithChildren
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -113,11 +125,13 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
+  '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/consult': typeof ConsultRoute
+  '/consult': typeof ConsultRouteWithChildren
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -128,13 +142,15 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/unauthorized': typeof UnauthorizedRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/expert': typeof AuthenticatedExpertExpertRoute
+  '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
-  '/consult': typeof ConsultRoute
+  '/consult': typeof ConsultRouteWithChildren
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -146,7 +162,9 @@ export interface FileRoutesById {
   '/unauthorized': typeof UnauthorizedRoute
   '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
   '/_authenticated/account': typeof AuthenticatedAccountRoute
+  '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
   '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
+  '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -163,7 +181,9 @@ export interface FileRouteTypes {
     | '/signup'
     | '/unauthorized'
     | '/account'
+    | '/consult/$consultId'
     | '/expert'
+    | '/consult/$consultId/result'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -178,7 +198,9 @@ export interface FileRouteTypes {
     | '/signup'
     | '/unauthorized'
     | '/account'
+    | '/consult/$consultId'
     | '/expert'
+    | '/consult/$consultId/result'
   id:
     | '__root__'
     | '/'
@@ -195,13 +217,15 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/_authenticated/_expert'
     | '/_authenticated/account'
+    | '/consult/$consultId'
     | '/_authenticated/_expert/expert'
+    | '/consult/$consultId/result'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
-  ConsultRoute: typeof ConsultRoute
+  ConsultRoute: typeof ConsultRouteWithChildren
   IntegrityRoute: typeof IntegrityRoute
   JourneyRoute: typeof JourneyRoute
   LoginRoute: typeof LoginRoute
@@ -299,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/consult/$consultId': {
+      id: '/consult/$consultId'
+      path: '/$consultId'
+      fullPath: '/consult/$consultId'
+      preLoaderRoute: typeof ConsultConsultIdRouteImport
+      parentRoute: typeof ConsultRoute
+    }
     '/_authenticated/account': {
       id: '/_authenticated/account'
       path: '/account'
@@ -312,6 +343,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedExpertRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/consult/$consultId/result': {
+      id: '/consult/$consultId/result'
+      path: '/result'
+      fullPath: '/consult/$consultId/result'
+      preLoaderRoute: typeof ConsultConsultIdResultRouteImport
+      parentRoute: typeof ConsultConsultIdRoute
     }
     '/_authenticated/_expert/expert': {
       id: '/_authenticated/_expert/expert'
@@ -348,10 +386,32 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
   AuthenticatedRouteChildren,
 )
 
+interface ConsultConsultIdRouteChildren {
+  ConsultConsultIdResultRoute: typeof ConsultConsultIdResultRoute
+}
+
+const ConsultConsultIdRouteChildren: ConsultConsultIdRouteChildren = {
+  ConsultConsultIdResultRoute: ConsultConsultIdResultRoute,
+}
+
+const ConsultConsultIdRouteWithChildren =
+  ConsultConsultIdRoute._addFileChildren(ConsultConsultIdRouteChildren)
+
+interface ConsultRouteChildren {
+  ConsultConsultIdRoute: typeof ConsultConsultIdRouteWithChildren
+}
+
+const ConsultRouteChildren: ConsultRouteChildren = {
+  ConsultConsultIdRoute: ConsultConsultIdRouteWithChildren,
+}
+
+const ConsultRouteWithChildren =
+  ConsultRoute._addFileChildren(ConsultRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
-  ConsultRoute: ConsultRoute,
+  ConsultRoute: ConsultRouteWithChildren,
   IntegrityRoute: IntegrityRoute,
   JourneyRoute: JourneyRoute,
   LoginRoute: LoginRoute,
@@ -365,3 +425,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}
