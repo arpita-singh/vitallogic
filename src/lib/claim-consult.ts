@@ -1,4 +1,5 @@
-import { claimConsultRequest } from "@/lib/consult-access";
+import { claimConsultRequest, StaleSessionError } from "@/lib/consult-access";
+import { supabase } from "@/integrations/supabase/client";
 
 const SESSION_KEY = "pendingConsultV2";
 const LEGACY_SESSION_ID_KEY = "pendingConsultId";
@@ -100,6 +101,11 @@ export function clearPendingConsult() {
 /**
  * Claim a previously-anonymous consult for the now-authenticated user.
  * Sends the anon token if we have one so the server can verify ownership.
+ *
+ * Returns the consultId we attempted to claim (for callers that want to
+ * navigate there), or null if there was nothing pending. On a stale-session
+ * 401 we silently sign the user out locally and return null — the calling
+ * page will then re-render into its signed-out state.
  */
 export async function claimPendingConsult(_userId: string): Promise<string | null> {
   const pending = getPendingConsult();
@@ -107,10 +113,16 @@ export async function claimPendingConsult(_userId: string): Promise<string | nul
   try {
     await claimConsultRequest(pending.consultId, pending.anonToken || undefined);
   } catch (e) {
+    if (e instanceof StaleSessionError) {
+      console.warn("claimPendingConsult: stale session, signing out locally");
+      await supabase.auth.signOut({ scope: "local" });
+      // Don't clear the pending pointer — once they sign back in, we want
+      // to retry the claim automatically.
+      return null;
+    }
     console.error("claimPendingConsult error", e);
-  } finally {
-    clearPendingConsult();
   }
+  clearPendingConsult();
   return pending.consultId;
 }
 
@@ -128,6 +140,11 @@ export async function claimSpecificConsult(
     if (getPendingConsultId() === consultId) clearPendingConsult();
     return !!res?.ok;
   } catch (e) {
+    if (e instanceof StaleSessionError) {
+      console.warn("claimSpecificConsult: stale session, signing out locally");
+      await supabase.auth.signOut({ scope: "local" });
+      return false;
+    }
     console.error("claimSpecificConsult error", e);
     return false;
   }
