@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Sparkles, Clock, ShieldAlert, CheckCircle2 } from "lucide-react";
 import { Section, SectionHeader } from "@/components/section";
 import { ModalityBadge, type Modality } from "@/components/consult/modality-badge";
+import { ContactCapture } from "@/components/consult/contact-capture";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
@@ -154,18 +155,16 @@ function ResultPage() {
               : "A qualified practitioner is reviewing your draft recommendation. Most are turned around within a few hours."}
           </p>
 
+          {!user && <ContactCapture consultId={consultId} />}
+
           {!user && (
-            <div className="mx-auto mt-8 max-w-sm rounded-2xl border border-violet/40 bg-violet/5 p-5">
-              <p className="text-sm text-foreground">
-                Create a free account so we can send your reviewed recommendation here.
-              </p>
-              <Link
-                to="/signup"
-                className="mt-3 inline-flex rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
-              >
-                Save my consult
-              </Link>
-            </div>
+            <p className="mx-auto mt-4 max-w-sm text-xs text-muted-foreground">
+              Prefer an account?{" "}
+              <Link to="/signup" className="text-gold underline-offset-2 hover:underline">
+                Create one
+              </Link>{" "}
+              and your consult is saved automatically.
+            </p>
           )}
         </div>
       </Section>
