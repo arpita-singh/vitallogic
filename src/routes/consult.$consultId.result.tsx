@@ -44,7 +44,7 @@ function ResultPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       const { data, error } = await supabase
         .from("prescriptions")
         .select("id, status, draft, final, review_notes")
@@ -56,9 +56,22 @@ function ResultPage() {
       if (error) console.error(error);
       setRx((data as unknown as Rx) ?? null);
       setLoading(false);
-    })();
+    };
+    void load();
+
+    // Realtime: refresh when this consult's prescription updates (e.g. expert approves).
+    const channel = supabase
+      .channel(`rx-${consultId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "prescriptions", filter: `consult_id=eq.${consultId}` },
+        () => void load(),
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
+      void supabase.removeChannel(channel);
     };
   }, [consultId]);
 

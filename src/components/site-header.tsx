@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Menu, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
   { to: "/philosophy", label: "Philosophy" },
@@ -14,8 +15,38 @@ const navItems = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
+  const [queueCount, setQueueCount] = useState<number>(0);
   const { isAuthenticated, hasAnyRole, signOut } = useAuth();
   const navigate = useNavigate();
+  const isExpert = hasAnyRole(["expert", "admin"]);
+
+  useEffect(() => {
+    if (!isExpert) {
+      setQueueCount(0);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { count } = await supabase
+        .from("prescriptions")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["pending_review", "escalated"]);
+      if (!cancelled) setQueueCount(count ?? 0);
+    };
+    void load();
+    const channel = supabase
+      .channel("header-queue-count")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "prescriptions" },
+        () => void load(),
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [isExpert]);
 
   const onSignOut = async () => {
     setOpen(false);
@@ -51,12 +82,18 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              {hasAnyRole(["expert", "admin"]) && (
+              {isExpert && (
                 <Link
                   to="/expert"
-                  className="hidden text-sm text-muted-foreground transition-colors hover:text-gold sm:inline"
+                  search={{ filter: "pending" }}
+                  className="hidden items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-gold sm:inline-flex"
                 >
                   Expert
+                  {queueCount > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold/20 px-1.5 text-[10px] font-medium text-gold">
+                      {queueCount}
+                    </span>
+                  )}
                 </Link>
               )}
               <Link
@@ -113,13 +150,19 @@ export function SiteHeader() {
               >
                 My account
               </Link>
-              {hasAnyRole(["expert", "admin"]) && (
+              {isExpert && (
                 <Link
                   to="/expert"
+                  search={{ filter: "pending" }}
                   onClick={() => setOpen(false)}
-                  className="rounded-md px-3 py-3 text-base text-gold hover:bg-surface"
+                  className="flex items-center justify-between rounded-md px-3 py-3 text-base text-gold hover:bg-surface"
                 >
-                  Expert dashboard
+                  <span>Expert dashboard</span>
+                  {queueCount > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold/20 px-1.5 text-[10px] font-medium text-gold">
+                      {queueCount}
+                    </span>
+                  )}
                 </Link>
               )}
               <button
