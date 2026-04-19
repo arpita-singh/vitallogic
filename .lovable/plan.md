@@ -1,43 +1,93 @@
 
 
-## Fix — `prescriptions_realtime_rls`
+## Fix — `intake_no_length_limits`
 
-### Context
-In the previous pass we already removed `prescriptions` from the `supabase_realtime` publication to close `prescriptions_realtime_no_rls_channel_auth`. The scanner is now flagging a related-but-distinct concern: even if Realtime were re-enabled, row-level filtering would not be guaranteed without (a) the table being in the publication with `REPLICA IDENTITY FULL`, and (b) SELECT RLS policies that correctly scope rows per subscriber.
+### Goal
+Add zod-based input validation to all server entry points that accept free-text from the browser, and bound conversation history before it hits the AI.
 
-Let me verify the current state before deciding.
+### Affected files
 
-### Verification step (during implementation)
-Run a read-only check via `supabase--read_query`:
-```sql
-select schemaname, tablename
-from pg_publication_tables
-where pubname = 'supabase_realtime' and tablename = 'prescriptions';
+1. **`src/lib/consult-server.ts`** — `startConsult`, `saveConsultContact`, `getConsult`, `claimConsult`, `unlockEducation`. Replace the placeholder `.inputValidator((data) => data)` with `zod` schemas that enforce length, format, and enum constraints.
+
+2. **`supabase/functions/consult-chat/index.ts`** — validate the request body with zod: bound the messages array length, per-message length, total payload, and role enum.
+
+3. **`supabase/functions/generate-prescription/index.ts`** — truncate `consult.intake` free-text fields and clip the joined message history to a hard character cap before embedding in the AI prompt.
+
+### Schema
+
+```ts
+// src/lib/consult-schema.ts (shared, server-only — also re-imported into edge fns by hand-copy since edge fns can't import src/)
+import { z } from "zod";
+
+const shortText = z.string().trim().max(500);
+const longText  = z.string().trim().max(2000);
+
+export const intakeSchema = z.object({
+  symptoms:     z.array(z.string().max(100)).max(20).default([]),
+  symptomsNote: longText.optional(),
+  duration:     z.enum(["acute", "subacute", "chronic"]).optional(),
+  severity:     z.number().int().min(0).max(10).optional(),
+  sleepHours:   z.number().min(0).max(24).optional(),
+  stress:       z.number().int().min(0).max(5).optional(),
+  diet:         shortText.optional(),
+  activity:     z.number().int().min(0).max(5).optional(),
+  meds:         longText.optional(),
+  allergies:    longText.optional(),
+  pregnancy:    z.enum(["yes", "no", "na"]).optional(),
+  under18:      z.boolean().optional(),
+  goals:        z.array(z.string().max(100)).max(20).default([]),
+  contactEmail: z.string().trim().toLowerCase().email().max(255).optional(),
+  contactName:  shortText.optional(),
+});
 ```
-- **If the row is absent** (expected) → `prescriptions` is not broadcast at all. Mark the finding as fixed with that explanation. No DB change needed.
-- **If the row is present** → drop it from the publication (the app fetches on demand; no UX regression):
-  ```sql
-  alter publication supabase_realtime drop table public.prescriptions;
-  ```
 
-Either way, the existing `prescriptions` SELECT policies are already correctly scoped per subscriber:
-- `Prescriptions: owner sees approved` — owner only sees their own row, only when `status = 'approved'`.
-- `Prescriptions: experts can select all` — gated by `has_role`.
+Then per server fn:
 
-So if Realtime is ever re-enabled in the future, row-level filtering will already be enforced (Supabase Realtime runs SELECT RLS as the subscriber for `postgres_changes`).
+```ts
+// startConsult
+.inputValidator((data: unknown) => z.object({
+  intake: intakeSchema,
+}).parse(data))
 
-### Fix the runtime error blocking preview
-Console shows `Missing Supabase server environment variables...` again. The Proxy fallback I added before still throws when none of `process.env.SUPABASE_URL` / `import.meta.env.SUPABASE_URL` / `import.meta.env.VITE_SUPABASE_URL` are set at the moment `supabaseAdmin` is first touched. I'll re-inspect `client.server.ts` and:
-- Confirm the env-var names actually exposed to the Worker bundle (Vite only inlines `VITE_*` by default; bare `SUPABASE_URL` from `import.meta.env` won't be replaced unless explicitly defined).
-- Use `VITE_SUPABASE_URL` (already in `.env`) as the primary source for the URL fallback.
-- For `SUPABASE_SERVICE_ROLE_KEY`, keep `process.env` only (never expose to client). If it's genuinely missing in the Worker runtime, the lazy throw is correct behaviour — but I'll add the missing-var name to the error so we know which one is empty.
+// saveConsultContact
+.inputValidator((data: unknown) => z.object({
+  consultId:    z.string().uuid(),
+  contactEmail: z.string().trim().toLowerCase().email().max(255),
+  contactName:  z.string().trim().max(500).optional(),
+  anonToken:    z.string().max(128).optional(),
+}).parse(data))
 
-### Files
-- `src/integrations/supabase/client.server.ts` — tighten env fallback + clearer error.
-- (Conditional) new migration if `prescriptions` is still in `supabase_realtime`.
-- Scanner: `mark_as_fixed` for `prescriptions_realtime_rls` with the verification result.
+// getConsult / claimConsult / unlockEducation — bound consultId/anonToken too
+```
+
+### consult-chat (edge function)
+
+```ts
+const Body = z.object({
+  consultId: z.string().uuid(),
+  messages: z.array(z.object({
+    role: z.enum(["user", "assistant", "system"]),
+    content: z.string().max(4000),
+  })).max(50),
+});
+const parsed = Body.parse(await req.json());
+const totalChars = parsed.messages.reduce((n, m) => n + m.content.length, 0);
+if (totalChars > 30_000) return new Response("Payload too large", { status: 413 });
+```
+
+Decision: **don't** rewrite the function to load history from the DB this pass — that's a larger behavioural change. The length caps already neutralise the storage-abuse and runaway-cost vectors the scanner cares about. I'll add a TODO comment.
+
+### generate-prescription (edge function)
+
+Truncate each intake free-text field and the concatenated message history to fixed caps before building the prompt. ~30k char hard cap.
+
+### Files changed
+- `src/lib/consult-server.ts` — zod validators on all 5 server fns.
+- `supabase/functions/consult-chat/index.ts` — body validation + length caps.
+- `supabase/functions/generate-prescription/index.ts` — truncation pre-prompt.
+- Scanner: `mark_as_fixed` for `intake_no_length_limits`.
 
 ### Out of scope
-- `user_purchases_owner_insert_no_update_check` (separate finding — needs server-side purchase write path).
-- `intake_no_length_limits` (separate finding — needs zod input schemas).
+- Loading message history from DB instead of trusting client (separate behavioural change).
+- `user_roles_self_readable` (separate finding, separate pass).
 
