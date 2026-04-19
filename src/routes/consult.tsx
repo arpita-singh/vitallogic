@@ -44,6 +44,7 @@ function ConsultPage() {
           // ignore
         }
       }
+      toast.success("Intake submitted — let's chat with your AI guide.");
       navigate({ to: "/consult/$consultId", params: { consultId } });
     } catch (e) {
       console.error(e);
