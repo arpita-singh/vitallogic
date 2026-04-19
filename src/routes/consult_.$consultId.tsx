@@ -214,6 +214,36 @@ function ConsultChatPage() {
   const userTurns = messages.filter((m) => m.role === "user").length;
   const canGenerate = userTurns >= 3 && !streaming && !generating;
 
+  // If a prescription already exists for this consult, show a focused
+  // CTA instead of the chat — patients shouldn't be looped back into chatting.
+  if (loaded && (hasApprovedRx || hasPendingRx)) {
+    return (
+      <Section className="!py-10 md:!py-16">
+        <div className="mx-auto max-w-xl text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-gold/40 bg-gold/10">
+            <Sparkles className="h-6 w-6 text-gold" />
+          </div>
+          <h1 className="mt-5 font-display text-3xl text-foreground md:text-4xl">
+            {hasApprovedRx ? "Your prescription is ready" : "Your consult is in review"}
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-muted-foreground">
+            {hasApprovedRx
+              ? "A practitioner has approved your recommendation."
+              : "A practitioner is reviewing your draft. We'll have something for you shortly."}
+          </p>
+          <Link
+            to="/consult/$consultId/result"
+            params={{ consultId }}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-gold px-6 py-3 text-sm font-semibold uppercase tracking-wider text-background hover:opacity-90"
+          >
+            <Sparkles className="h-4 w-4" />
+            {hasApprovedRx ? "View prescription" : "View status"}
+          </Link>
+        </div>
+      </Section>
+    );
+  }
+
   return (
     <Section className="!py-6 md:!py-10">
       <div className="mx-auto flex h-[calc(100vh-12rem)] max-w-2xl flex-col">
