@@ -79,7 +79,7 @@ function ReviewPage() {
     }
     const presc = p as unknown as Prescription;
     setRx(presc);
-    setEdit((presc.final ?? presc.draft) as RxData);
+    setEdit(normalizeRx((presc.final ?? presc.draft) as Partial<RxData> | null));
     setAttachedProducts((presc.attached_products ?? []) as AttachedProduct[]);
     setNotes(presc.review_notes ?? "");
 
@@ -506,4 +506,88 @@ function IntakeRow({ label, value }: { label: string; value?: string | null }) {
       <dd className="text-sm text-foreground">{value}</dd>
     </div>
   );
+}
+
+// Normalize any draft/final shape (including legacy AI outputs that used different
+// field names like `safety`, `intervention`) into the RxData schema the editor expects.
+type LegacyRec = {
+  title?: string;
+  modality?: string;
+  rationale?: string;
+  intervention?: string;
+  suggested_products?: unknown;
+  safety_notes?: string;
+  safety?: unknown;
+  citations?: unknown;
+};
+type LegacyRx = {
+  summary?: string;
+  red_flags?: unknown;
+  escalate?: boolean;
+  recommendations?: LegacyRec[];
+  safety?: unknown;
+  citations?: unknown;
+};
+
+const VALID_MODALITIES = [
+  "ayurveda",
+  "western_naturopathy",
+  "indigenous",
+  "plant_medicine",
+  "lifestyle",
+] as const;
+
+function normalizeModality(m: unknown): RxData["recommendations"][number]["modality"] {
+  const s = String(m ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  const map: Record<string, RxData["recommendations"][number]["modality"]> = {
+    naturopathy: "western_naturopathy",
+    western: "western_naturopathy",
+  };
+  if (map[s]) return map[s];
+  return (VALID_MODALITIES as readonly string[]).includes(s)
+    ? (s as RxData["recommendations"][number]["modality"])
+    : "lifestyle";
+}
+
+function toStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x)).filter(Boolean);
+}
+
+function normalizeRx(input: Partial<RxData> | LegacyRx | null): RxData {
+  const raw = (input ?? {}) as LegacyRx & Partial<RxData>;
+  const recsSource = Array.isArray(raw.recommendations) ? raw.recommendations : [];
+  const recommendations: RxData["recommendations"] = recsSource.map((r) => {
+    const rec = r as LegacyRec & Partial<RxData["recommendations"][number]>;
+    const products = Array.isArray(rec.suggested_products)
+      ? (rec.suggested_products as RxData["recommendations"][number]["suggested_products"])
+      : rec.intervention
+        ? [{ name: String(rec.intervention), form: "", dosage: "", notes: "" }]
+        : [];
+    const safetyNotes =
+      rec.safety_notes ??
+      (Array.isArray(rec.safety) ? (rec.safety as unknown[]).map(String).join("; ") : "");
+    return {
+      title: rec.title ?? "",
+      modality: normalizeModality(rec.modality),
+      rationale: rec.rationale ?? "",
+      suggested_products: products,
+      safety_notes: safetyNotes,
+      citations: toStringArray(rec.citations),
+    };
+  });
+  if (recommendations.length > 0) {
+    if (!recommendations[0].safety_notes && Array.isArray(raw.safety)) {
+      recommendations[0].safety_notes = (raw.safety as unknown[]).map(String).join("; ");
+    }
+    if (recommendations[0].citations.length === 0 && Array.isArray(raw.citations)) {
+      recommendations[0].citations = toStringArray(raw.citations);
+    }
+  }
+  return {
+    summary: raw.summary ?? "",
+    red_flags: toStringArray(raw.red_flags),
+    escalate: Boolean(raw.escalate),
+    recommendations,
+  };
 }
