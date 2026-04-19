@@ -3,7 +3,12 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Menu, X } from "lucide-react";
 import logo from "@/assets/vital-logic-logo.svg";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/auth";
+import {
+  useAuth,
+  getStoredViewMode,
+  setStoredViewMode,
+  type ViewMode,
+} from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
@@ -18,9 +23,27 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [queueCount, setQueueCount] = useState<number>(0);
   const [readyCount, setReadyCount] = useState<number>(0);
+  const [singleReadyConsultId, setSingleReadyConsultId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("patient");
   const { isAuthenticated, hasAnyRole, signOut, user } = useAuth();
   const navigate = useNavigate();
   const isExpert = hasAnyRole(["expert", "admin"]);
+
+  // Initialise view mode from localStorage on mount
+  useEffect(() => {
+    setViewMode(getStoredViewMode());
+  }, []);
+
+  const switchView = (mode: ViewMode) => {
+    setViewMode(mode);
+    setStoredViewMode(mode);
+    setOpen(false);
+    if (mode === "expert") {
+      void navigate({ to: "/expert", search: { filter: "pending" } });
+    } else {
+      void navigate({ to: "/account" });
+    }
+  };
 
   useEffect(() => {
     if (!isExpert) {
@@ -53,16 +76,21 @@ export function SiteHeader() {
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setReadyCount(0);
+      setSingleReadyConsultId(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
       // RLS limits this to the patient's own approved prescriptions
-      const { count } = await supabase
+      const { data, count } = await supabase
         .from("prescriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "approved");
-      if (!cancelled) setReadyCount(count ?? 0);
+        .select("id, consult_id, reviewed_at", { count: "exact" })
+        .eq("status", "approved")
+        .order("reviewed_at", { ascending: false });
+      if (cancelled) return;
+      const c = count ?? 0;
+      setReadyCount(c);
+      setSingleReadyConsultId(c === 1 && data && data[0] ? data[0].consult_id : null);
     };
     void load();
     const channel = supabase
@@ -84,6 +112,18 @@ export function SiteHeader() {
     await signOut();
     navigate({ to: "/" });
   };
+
+  // Resolve the destination for the notification badge
+  const accountHref = singleReadyConsultId
+    ? { to: "/consult/$consultId/result" as const, params: { consultId: singleReadyConsultId } }
+    : readyCount > 0
+      ? { to: "/account" as const, search: { ready: 1 } }
+      : { to: "/account" as const };
+
+  // Dual-role users see the toggle; mode controls which auth-area links show
+  const showToggle = isAuthenticated && isExpert;
+  const showExpertLink = isExpert && (!showToggle || viewMode === "expert");
+  const showAccountLink = isAuthenticated && (!showToggle || viewMode === "patient");
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">
@@ -111,7 +151,39 @@ export function SiteHeader() {
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              {isExpert && (
+              {showToggle && (
+                <div
+                  className="hidden items-center rounded-full border border-border bg-surface p-0.5 sm:inline-flex"
+                  role="group"
+                  aria-label="Switch view"
+                >
+                  <button
+                    type="button"
+                    onClick={() => switchView("patient")}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                      viewMode === "patient"
+                        ? "bg-gold text-background"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    Patient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchView("expert")}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                      viewMode === "expert"
+                        ? "bg-gold text-background"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    Expert
+                  </button>
+                </div>
+              )}
+              {showExpertLink && (
                 <Link
                   to="/expert"
                   search={{ filter: "pending" }}
@@ -125,20 +197,24 @@ export function SiteHeader() {
                   )}
                 </Link>
               )}
-              <Link
-                to="/account"
-                className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
-              >
-                Account
-                {readyCount > 0 && (
-                  <span
-                    className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background"
-                    aria-label={`${readyCount} prescription${readyCount === 1 ? "" : "s"} ready`}
-                  >
-                    {readyCount}
-                  </span>
-                )}
-              </Link>
+              {showAccountLink && (
+                <Link
+                  {...accountHref}
+                  className="relative hidden items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-gold sm:inline-flex"
+                  aria-label={
+                    readyCount > 0
+                      ? `Account — ${readyCount} prescription${readyCount === 1 ? "" : "s"} ready`
+                      : "Account"
+                  }
+                >
+                  Account
+                  {readyCount > 0 && (
+                    <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
+                      {readyCount}
+                    </span>
+                  )}
+                </Link>
+              )}
             </>
           ) : (
             <>
@@ -170,7 +246,7 @@ export function SiteHeader() {
       <div
         className={cn(
           "overflow-hidden border-t border-border/40 transition-all duration-300 md:hidden",
-          open ? "max-h-[640px]" : "max-h-0",
+          open ? "max-h-[720px]" : "max-h-0",
         )}
       >
         <nav className="flex flex-col gap-1 px-4 py-4">
@@ -188,18 +264,48 @@ export function SiteHeader() {
 
           {isAuthenticated ? (
             <>
-              <Link
-                to="/account"
-                onClick={() => setOpen(false)}
-                className="mt-2 flex items-center justify-between rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
-              >
-                <span>My account</span>
-                {readyCount > 0 && (
-                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
-                    {readyCount}
-                  </span>
-                )}
-              </Link>
+              {showToggle && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => switchView("patient")}
+                    className={cn(
+                      "rounded-full border px-3 py-2.5 text-sm font-medium transition-colors",
+                      viewMode === "patient"
+                        ? "border-gold bg-gold text-background"
+                        : "border-border text-muted-foreground",
+                    )}
+                  >
+                    Patient view
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchView("expert")}
+                    className={cn(
+                      "rounded-full border px-3 py-2.5 text-sm font-medium transition-colors",
+                      viewMode === "expert"
+                        ? "border-gold bg-gold text-background"
+                        : "border-border text-muted-foreground",
+                    )}
+                  >
+                    Expert view
+                  </button>
+                </div>
+              )}
+              {showAccountLink && (
+                <Link
+                  {...accountHref}
+                  onClick={() => setOpen(false)}
+                  className="mt-2 flex items-center justify-between rounded-md px-3 py-3 text-base text-foreground hover:bg-surface"
+                >
+                  <span>My account</span>
+                  {readyCount > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-semibold text-background">
+                      {readyCount}
+                    </span>
+                  )}
+                </Link>
+              )}
               <Link
                 to="/owner-manual"
                 onClick={() => setOpen(false)}
@@ -207,7 +313,7 @@ export function SiteHeader() {
               >
                 Owner's Manual
               </Link>
-              {isExpert && (
+              {showExpertLink && (
                 <Link
                   to="/expert"
                   search={{ filter: "pending" }}
