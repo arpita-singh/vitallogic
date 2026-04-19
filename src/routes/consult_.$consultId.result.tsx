@@ -134,6 +134,51 @@ function ResultPage() {
     );
   }
 
+  // Gate: anonymous consult OR signed-in user who doesn't own this consult
+  // → show sign-in / sign-up prompt instead of the prescription.
+  const isOwner = user && consultOwnerId && user.id === consultOwnerId;
+  const needsAuth = !isOwner;
+  if (needsAuth) {
+    rememberPendingConsult(consultId);
+    const redirectPath = `/consult/${consultId}/result`;
+    return (
+      <Section>
+        <div className="mx-auto max-w-xl rounded-3xl border border-gold/40 bg-gradient-to-br from-gold/10 via-background to-violet/10 p-8 text-center md:p-10">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-gold/40 bg-gold/10">
+            <LogIn className="h-7 w-7 text-gold" />
+          </div>
+          <h1 className="mt-5 font-display text-3xl text-foreground md:text-4xl">
+            Sign in to view your prescription
+          </h1>
+          <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+            Your practitioner is reviewing your consult. Sign in or create an account
+            {intakeEmail ? <> with <span className="text-foreground">{intakeEmail}</span></> : null}
+            {" "}to securely receive your recommendation.
+          </p>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              to="/login"
+              search={{ redirect: redirectPath }}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              <LogIn className="h-4 w-4" /> Sign in
+            </Link>
+            <Link
+              to="/signup"
+              search={{ redirect: redirectPath, email: intakeEmail }}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-gold/60 bg-transparent px-6 py-3 text-sm font-medium text-foreground hover:bg-gold/10"
+            >
+              <UserPlus className="h-4 w-4" /> Create account
+            </Link>
+          </div>
+          <p className="mt-6 text-xs text-muted-foreground">
+            Email, Google, or Apple — choose what's easiest.
+          </p>
+        </div>
+      </Section>
+    );
+  }
+
   if (!rx) {
     return (
       <Section>
