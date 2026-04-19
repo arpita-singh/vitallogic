@@ -1,65 +1,53 @@
 
 
-## Plan — Pre-flight prescription edit + email delivery
+## Plan — Review modal + sign-up flow for unauthenticated patients
 
-The user wants two things before approving sends a prescription to the patient:
-1. **A focused "edit & finalise" module** — the existing right-column editor is fine for inline tweaks, but there's no clear "review what the patient will actually see" moment before hitting Approve.
-2. **Email the approved prescription to the patient** — currently Approve just flips the status; the patient only finds out by reloading their result page.
+Two parts, no email needed yet.
 
 ---
 
-### Step 1 — Email infrastructure (prerequisite)
-
-The project has zero email setup today (no `src/lib/email-templates/`, no email server routes, no email domain). To send emails from the app we need a verified sender domain first.
-
-I'll surface the Lovable email setup dialog so the user can configure a sender domain. Once that's done (status `awaiting_dns` is fine — we don't need full DNS verification to scaffold/code), I'll:
-- run `setup_email_infra` to provision queues + tables + cron
-- run `scaffold_transactional_email` to create the send route + template registry
-- create `src/lib/email-templates/prescription-approved.tsx` — a React Email template that renders:
-  - greeting with the patient's name
-  - practitioner summary
-  - each recommendation (title, modality, rationale, safety notes)
-  - attached marketplace products (name, vendor, AUST‑L, price, dosage notes)
-  - reviewer notes (if any)
-  - a "View your full recommendation" button linking to `/consult/{id}/result`
-  - matches Sunny Goth palette (gold accent on white body — required by email rules)
-
----
-
-### Step 2 — Prescription review modal (pre-send)
+### Part 1 — Prescription review modal (pre-send gate)
 
 New component `src/components/expert/prescription-review-modal.tsx`:
-- shadcn `Dialog` triggered by a new "Review & send to patient" button (replaces the current bare "Approve" button).
-- Renders the **exact patient-facing layout** using the in-memory `edit` + `attachedProducts` state (so the expert sees what the patient will see, including products and reviewer notes), wrapped in a "Patient preview" frame.
-- Below the preview, a recipient block:
-  - shows resolved patient email (from `consult.intake.contactEmail` or the consult owner's profile email)
-  - editable input if the email is missing or wrong
-  - a "Send copy to me as well" checkbox (sends to the reviewing expert too)
-- Footer actions: `Back to edit` (close) and `Approve & send` (primary).
+- shadcn `Dialog` (already installed).
+- Trigger: replace the current bare "Approve" button in `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` with **"Review & approve"**.
+- Body renders a **patient-facing preview** built from the live `edit` + `attachedProducts` state, mirroring exactly what `consult_.$consultId.result.tsx` shows (summary, red flags, each recommendation card with rationale/safety/citations, attached product cards). Wrapped in a "Patient preview" frame so the expert knows it's a preview.
+- Footer: `Back to edit` (close) and `Approve & publish` (primary, gold).
+- `Approve & publish` runs the existing approve mutation unchanged (status, final, attached_products, reviewed_*, audit row). On success: toast "Approved — patient will see this on sign-in", close modal, page transitions to the resolved/approved view.
+- A small "Patient access" notice in the modal footer: *"Patient must sign in or sign up with the email used at intake to view this prescription."* — sets expectations until email is wired.
 
-The existing inline editor stays — this modal is the final gate, not a replacement.
-
----
-
-### Step 3 — Wire approve → send email
-
-Update `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx`:
-- Replace the current Approve button with `Review & send to patient` opening the modal.
-- The modal's `Approve & send` runs the existing approve mutation (status, final, attached_products, reviewed_*, audit), then calls a small client helper `sendPrescriptionEmail({ prescriptionId, recipientEmail, ccExpert })` which POSTs to the `send-transactional-email` server route with:
-  - `templateName: "prescription-approved"`
-  - `recipientEmail`
-  - `idempotencyKey: prescription-approved-${prescriptionId}`
-  - `templateData: { patientName, summary, recommendations, products, reviewNotes, resultUrl }`
-- After enqueueing, write a new `prescription_audit` row `action: "email_sent"` with `diff: { recipient, ccExpert }` so the audit trail captures it.
-- Toast `Approved and emailed to {patient}` on success; `Approved (email failed — try resend)` if the enqueue fails (the approval still stands — failures are non-blocking).
-
-A small "Resend email" button appears on already-approved prescriptions in case the first send failed or the patient lost it.
+Existing inline editor on the page stays intact — modal is the final gate, not a replacement.
 
 ---
 
-### Step 4 — Public unsubscribe page
+### Part 2 — Sign-up / sign-in for unauthenticated patients viewing a result
 
-Required by the transactional-email scaffolding: `src/routes/unsubscribe.tsx` reads the `?token=` param and renders a branded confirm/success/already-done state, calling the scaffolded `/email/unsubscribe` endpoints.
+**Problem today:** when an anonymous user finishes a consult, their consult has `user_id = null`. Even after expert approval, they can't see the prescription because the RLS policy `Prescriptions: owner sees approved` requires `consults.user_id = auth.uid()`.
+
+**Fix — gated result view + claim-on-signin:**
+
+1. **`src/routes/consult_.$consultId.result.tsx`** — add an auth/ownership gate at the top:
+   - If consult `user_id IS NULL` (anonymous) OR the current user doesn't own it → render a **"Sign in to view your prescription"** card instead of the result body.
+   - The card explains: "Your practitioner is reviewing your consult. Sign in or create an account with the email you used at intake to receive your prescription."
+   - Two CTAs: **Sign in** and **Create account**, each linking to `/login?redirect=/consult/{id}/result` and `/signup?redirect=/consult/{id}/result&email={intake.contactEmail}` so the user lands back here after auth.
+
+2. **Auto-claim anonymous consult on auth** — new helper `src/lib/claim-consult.ts`:
+   - Reads pending consult id from `sessionStorage` key `pendingConsultId` (set whenever the result page detects an anonymous consult).
+   - After successful sign-in / sign-up / OAuth callback, if the stored consult is still `user_id IS NULL`, run `update consults set user_id = auth.uid() where id = ? and user_id is null` (already permitted by the existing `Consults: claim anonymous` RLS policy).
+   - Clear the storage key, navigate to `/consult/{id}/result`.
+   - Hook this helper into `src/lib/auth.tsx`'s `signIn` / `signUp` success paths and into a new `/auth/callback` handler the OAuth providers redirect to (TanStack route file `src/routes/auth.callback.tsx`).
+
+3. **Login + Signup pages — add social sign-in buttons** (`src/routes/login.tsx`, `src/routes/signup.tsx`):
+   - Existing email + password forms stay.
+   - Add three branded buttons under a divider: **Continue with Google**, **Continue with Apple**, **Continue with Facebook**.
+   - Lovable Cloud supports Google + Apple natively (managed credentials, no setup needed). **Facebook is NOT supported by Lovable Cloud's managed auth** — I'll explain in the modal/UI that Facebook requires the external Supabase integration to enable, and either:
+     - **(a)** Ship Google + Apple now (recommended — zero setup, works immediately), OR
+     - **(b)** Also add Facebook with a "Coming soon" disabled state until the user opts to wire it up via the Supabase dashboard.
+   - Default: ship Google + Apple as live buttons; Facebook as a disabled "Coming soon — requires extra setup" button so the design is in place. I'll surface this clearly to the user before building.
+
+4. **Use Lovable's managed OAuth helper** — call `lovable.auth.signInWithOAuth("google" | "apple", { redirect_uri: window.location.origin + "/auth/callback" })`. The configure-social-login tool will scaffold `src/integrations/lovable/` and install `@lovable.dev/cloud-auth-js` automatically — I won't hand-write that module.
+
+5. **`/auth/callback` route** — receives the post-OAuth redirect, runs `claimPendingConsult()`, then navigates to the stored `redirect` search param (or `/`).
 
 ---
 
@@ -67,24 +55,21 @@ Required by the transactional-email scaffolding: `src/routes/unsubscribe.tsx` re
 
 **New:**
 - `src/components/expert/prescription-review-modal.tsx`
-- `src/lib/email-templates/prescription-approved.tsx`
-- `src/lib/email/send.ts` (thin helper for the send route)
-- `src/routes/unsubscribe.tsx`
-- (auto-created by scaffolding tool) `src/routes/lovable/email/...` server routes + `src/lib/email-templates/registry.ts`
+- `src/lib/claim-consult.ts`
+- `src/routes/auth.callback.tsx`
+- (auto-created by social-login tool) `src/integrations/lovable/index.ts` + package install
 
 **Modified:**
-- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` (swap Approve → modal trigger; add resend button on resolved state)
+- `src/routes/_authenticated/_expert/expert_.$prescriptionId.tsx` — swap Approve → modal trigger
+- `src/routes/consult_.$consultId.result.tsx` — auth/ownership gate + sign-in CTAs + sessionStorage write
+- `src/routes/login.tsx` — add social buttons + redirect-back support (already partially there)
+- `src/routes/signup.tsx` — add social buttons + email prefill from search param
+- `src/lib/auth.tsx` — call `claimPendingConsult()` after successful signIn/signUp
 
-**No DB migration needed** — `prescription_audit` already supports the new `email_sent` action via free-form `action` text.
+**No DB migration needed** — existing `Consults: claim anonymous` RLS policy already supports the claim flow, and the `Prescriptions: owner sees approved` policy already gates result visibility correctly.
 
 ### Out of scope
-- No SMS / no in-app notification.
-- No rich PDF attachment (Lovable email infra doesn't support attachments — the email links back to the result page, which already renders the full prescription).
-- No marketing/newsletter tooling.
-
-The first step is configuring an email sender domain — that's a one-time setup. Once that's in place, everything above can be built and tested.
-
-<lov-actions>
-<lov-open-email-setup>Set up email domain</lov-open-email-setup>
-</lov-actions>
+- Email delivery (deferred until domain is ready).
+- Facebook live button (Lovable Cloud doesn't manage it; will appear as "Coming soon" until user opts into Supabase-dashboard setup).
+- Phone/SMS sign-in (not requested).
 
