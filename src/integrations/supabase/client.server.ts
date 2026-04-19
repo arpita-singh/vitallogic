@@ -5,30 +5,39 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+function readEnv(name: string, viteFallback?: string): string | undefined {
+  const fromProcess = typeof process !== 'undefined' ? process.env?.[name] : undefined;
+  if (fromProcess) return fromProcess;
+  const meta = (import.meta as any).env ?? {};
+  if (meta[name]) return meta[name];
+  if (viteFallback && meta[viteFallback]) return meta[viteFallback];
+  return undefined;
+}
+
 function createSupabaseAdminClient() {
   // Worker runtime sometimes has an empty process.env shim — fall back to
   // import.meta.env which Vite inlines at build time. The service-role key
   // NEVER falls back to a VITE_ value (that would leak it to the client bundle).
-  const SUPABASE_URL =
-    process.env.SUPABASE_URL ??
-    (import.meta as any).env?.SUPABASE_URL ??
-    (import.meta as any).env?.VITE_SUPABASE_URL;
-  const SUPABASE_SERVICE_ROLE_KEY =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    (import.meta as any).env?.SUPABASE_SERVICE_ROLE_KEY;
+  const SUPABASE_URL = readEnv('SUPABASE_URL', 'VITE_SUPABASE_URL');
+  const SUPABASE_SERVICE_ROLE_KEY = readEnv('SUPABASE_SERVICE_ROLE_KEY');
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  const missing: string[] = [];
+  if (!SUPABASE_URL) missing.push('SUPABASE_URL');
+  if (!SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (missing.length > 0) {
     throw new Error(
-      'Missing Supabase server environment variables. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.'
+      `Missing Supabase server environment variables: ${missing.join(', ')}. ` +
+        `Ensure they are set in the server runtime (process.env or build-time import.meta.env).`
     );
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient<Database>(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
     auth: {
       storage: undefined,
       persistSession: false,
       autoRefreshToken: false,
-    }
+    },
   });
 }
 
@@ -37,6 +46,10 @@ let _supabaseAdmin: ReturnType<typeof createSupabaseAdminClient> | undefined;
 // Server-side Supabase client with service role - bypasses RLS
 // SECURITY: Only use this for trusted server-side operations, never expose to client code
 // Import like: import { supabaseAdmin } from "@/integrations/supabase/client.server";
+//
+// Initialization is LAZY: the client is only built on first property access, so
+// merely importing this module from SSR-bundled code never throws — only
+// actually using `supabaseAdmin` without env will throw.
 export const supabaseAdmin = new Proxy({} as ReturnType<typeof createSupabaseAdminClient>, {
   get(_, prop, receiver) {
     if (!_supabaseAdmin) _supabaseAdmin = createSupabaseAdminClient();
