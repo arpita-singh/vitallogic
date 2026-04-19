@@ -9,14 +9,37 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UnauthorizedRouteImport } from './routes/unauthorized'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as PillarsRouteImport } from './routes/pillars'
 import { Route as PhilosophyRouteImport } from './routes/philosophy'
 import { Route as OriginsRouteImport } from './routes/origins'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as JourneyRouteImport } from './routes/journey'
 import { Route as IntegrityRouteImport } from './routes/integrity'
 import { Route as ConsultRouteImport } from './routes/consult'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
+import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/_expert'
+import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
 
+const UnauthorizedRoute = UnauthorizedRouteImport.update({
+  id: '/unauthorized',
+  path: '/unauthorized',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PillarsRoute = PillarsRouteImport.update({
   id: '/pillars',
   path: '/pillars',
@@ -30,6 +53,11 @@ const PhilosophyRoute = PhilosophyRouteImport.update({
 const OriginsRoute = OriginsRouteImport.update({
   id: '/origins',
   path: '/origins',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JourneyRoute = JourneyRouteImport.update({
@@ -47,39 +75,78 @@ const ConsultRoute = ConsultRouteImport.update({
   path: '/consult',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedExpertRoute = AuthenticatedExpertRouteImport.update({
+  id: '/_expert',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedExpertExpertRoute =
+  AuthenticatedExpertExpertRouteImport.update({
+    id: '/expert',
+    path: '/expert',
+    getParentRoute: () => AuthenticatedExpertRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
+  '/login': typeof LoginRoute
   '/origins': typeof OriginsRoute
   '/philosophy': typeof PhilosophyRoute
   '/pillars': typeof PillarsRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/signup': typeof SignupRoute
+  '/unauthorized': typeof UnauthorizedRoute
+  '/account': typeof AuthenticatedAccountRoute
+  '/expert': typeof AuthenticatedExpertExpertRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
+  '/login': typeof LoginRoute
   '/origins': typeof OriginsRoute
   '/philosophy': typeof PhilosophyRoute
   '/pillars': typeof PillarsRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/signup': typeof SignupRoute
+  '/unauthorized': typeof UnauthorizedRoute
+  '/account': typeof AuthenticatedAccountRoute
+  '/expert': typeof AuthenticatedExpertExpertRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/consult': typeof ConsultRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
+  '/login': typeof LoginRoute
   '/origins': typeof OriginsRoute
   '/philosophy': typeof PhilosophyRoute
   '/pillars': typeof PillarsRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/signup': typeof SignupRoute
+  '/unauthorized': typeof UnauthorizedRoute
+  '/_authenticated/_expert': typeof AuthenticatedExpertRouteWithChildren
+  '/_authenticated/account': typeof AuthenticatedAccountRoute
+  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -88,41 +155,87 @@ export interface FileRouteTypes {
     | '/consult'
     | '/integrity'
     | '/journey'
+    | '/login'
     | '/origins'
     | '/philosophy'
     | '/pillars'
+    | '/reset-password'
+    | '/signup'
+    | '/unauthorized'
+    | '/account'
+    | '/expert'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/consult'
     | '/integrity'
     | '/journey'
+    | '/login'
     | '/origins'
     | '/philosophy'
     | '/pillars'
+    | '/reset-password'
+    | '/signup'
+    | '/unauthorized'
+    | '/account'
+    | '/expert'
   id:
     | '__root__'
     | '/'
+    | '/_authenticated'
     | '/consult'
     | '/integrity'
     | '/journey'
+    | '/login'
     | '/origins'
     | '/philosophy'
     | '/pillars'
+    | '/reset-password'
+    | '/signup'
+    | '/unauthorized'
+    | '/_authenticated/_expert'
+    | '/_authenticated/account'
+    | '/_authenticated/_expert/expert'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   ConsultRoute: typeof ConsultRoute
   IntegrityRoute: typeof IntegrityRoute
   JourneyRoute: typeof JourneyRoute
+  LoginRoute: typeof LoginRoute
   OriginsRoute: typeof OriginsRoute
   PhilosophyRoute: typeof PhilosophyRoute
   PillarsRoute: typeof PillarsRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  SignupRoute: typeof SignupRoute
+  UnauthorizedRoute: typeof UnauthorizedRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/unauthorized': {
+      id: '/unauthorized'
+      path: '/unauthorized'
+      fullPath: '/unauthorized'
+      preLoaderRoute: typeof UnauthorizedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pillars': {
       id: '/pillars'
       path: '/pillars'
@@ -142,6 +255,13 @@ declare module '@tanstack/react-router' {
       path: '/origins'
       fullPath: '/origins'
       preLoaderRoute: typeof OriginsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/journey': {
@@ -165,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsultRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -172,17 +299,68 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/account': {
+      id: '/_authenticated/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AuthenticatedAccountRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/_expert': {
+      id: '/_authenticated/_expert'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedExpertRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/_expert/expert': {
+      id: '/_authenticated/_expert/expert'
+      path: '/expert'
+      fullPath: '/expert'
+      preLoaderRoute: typeof AuthenticatedExpertExpertRouteImport
+      parentRoute: typeof AuthenticatedExpertRoute
+    }
   }
 }
 
+interface AuthenticatedExpertRouteChildren {
+  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRoute
+}
+
+const AuthenticatedExpertRouteChildren: AuthenticatedExpertRouteChildren = {
+  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRoute,
+}
+
+const AuthenticatedExpertRouteWithChildren =
+  AuthenticatedExpertRoute._addFileChildren(AuthenticatedExpertRouteChildren)
+
+interface AuthenticatedRouteChildren {
+  AuthenticatedExpertRoute: typeof AuthenticatedExpertRouteWithChildren
+  AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedExpertRoute: AuthenticatedExpertRouteWithChildren,
+  AuthenticatedAccountRoute: AuthenticatedAccountRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
   ConsultRoute: ConsultRoute,
   IntegrityRoute: IntegrityRoute,
   JourneyRoute: JourneyRoute,
+  LoginRoute: LoginRoute,
   OriginsRoute: OriginsRoute,
   PhilosophyRoute: PhilosophyRoute,
   PillarsRoute: PillarsRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SignupRoute: SignupRoute,
+  UnauthorizedRoute: UnauthorizedRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
