@@ -292,3 +292,76 @@ export const claimConsult = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+/**
+ * Unlock the Owner's Manual education content for the signed-in user.
+ *
+ * Server-side gate: the caller must own a consult that has an APPROVED
+ * prescription. Browsers can no longer insert into `user_purchases` directly
+ * (RLS no longer permits it) — this is the only sanctioned write path.
+ *
+ * Idempotent: if a row already exists, we just flip the flag.
+ */
+export const unlockEducation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { consultId: string }) => data)
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+
+    // 1. Verify the caller owns this consult.
+    const { data: consultRow, error: consultErr } = await supabaseAdmin
+      .from("consults")
+      .select("id, user_id")
+      .eq("id", data.consultId)
+      .maybeSingle();
+    if (consultErr || !consultRow) throw new Error("Consult not found");
+    if (consultRow.user_id !== userId) throw new Error("Unauthorized");
+
+    // 2. Verify the consult has an APPROVED prescription. This is the
+    //    entitlement gate — without it, an authenticated user could otherwise
+    //    self-grant access by passing any consult id they own.
+    const { data: rxRow, error: rxErr } = await supabaseAdmin
+      .from("prescriptions")
+      .select("id, status")
+      .eq("consult_id", data.consultId)
+      .eq("status", "approved")
+      .maybeSingle();
+    if (rxErr) {
+      console.error("unlockEducation rx lookup failed", rxErr);
+      throw new Error("Could not unlock right now");
+    }
+    if (!rxRow) throw new Error("No approved prescription for this consult");
+
+    // 3. Idempotent upsert. If the user already has a purchases row, flip the
+    //    flag; otherwise insert a new one. We avoid relying on a DB-level
+    //    unique constraint and just check first.
+    const { data: existing } = await supabaseAdmin
+      .from("user_purchases")
+      .select("id, has_unlocked_education")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existing) {
+      if (existing.has_unlocked_education) return { ok: true };
+      const { error: updErr } = await supabaseAdmin
+        .from("user_purchases")
+        .update({ has_unlocked_education: true, consult_id: data.consultId })
+        .eq("id", existing.id);
+      if (updErr) {
+        console.error("unlockEducation update failed", updErr);
+        throw new Error("Could not unlock right now");
+      }
+      return { ok: true };
+    }
+
+    const { error: insErr } = await supabaseAdmin.from("user_purchases").insert({
+      user_id: userId,
+      consult_id: data.consultId,
+      has_unlocked_education: true,
+    });
+    if (insErr) {
+      console.error("unlockEducation insert failed", insErr);
+      throw new Error("Could not unlock right now");
+    }
+    return { ok: true };
+  });

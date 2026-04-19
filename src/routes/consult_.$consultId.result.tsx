@@ -10,7 +10,7 @@ import type { AttachedProduct } from "@/components/expert/product-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
-import { getConsult } from "@/lib/consult-server";
+import { getConsult, unlockEducation } from "@/lib/consult-server";
 
 export const Route = createFileRoute("/consult_/$consultId/result")({
   head: () => ({
@@ -139,19 +139,19 @@ function ResultPage() {
       return;
     }
     setUnlocking(true);
-    const { error } = await supabase.from("user_purchases").insert({
-      user_id: user.id,
-      consult_id: consultId,
-      has_unlocked_education: true,
-    });
-    if (error) {
-      console.error(error);
-      toast.error("Could not unlock right now. Please try again.");
+    try {
+      await unlockEducation({ data: { consultId } });
+      toast.success("Unlocked. Welcome to your Owner's Manual.");
+      void navigate({ to: "/owner-manual" });
+    } catch (err) {
+      console.error(err);
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not unlock right now. Please try again.";
+      toast.error(message);
       setUnlocking(false);
-      return;
     }
-    toast.success("Unlocked. Welcome to your Owner's Manual.");
-    void navigate({ to: "/owner-manual" });
   };
 
   if (loading) {
