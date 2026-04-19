@@ -18,7 +18,7 @@ import { ProductPicker, type AttachedProduct } from "@/components/expert/product
 import { PrescriptionReviewModal } from "@/components/expert/prescription-review-modal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import type { Intake } from "@/lib/consult-server";
+import type { Intake } from "@/lib/consult-types";
 
 export const Route = createFileRoute("/_authenticated/_expert/expert_/$prescriptionId")({
   head: () => ({

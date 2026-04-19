@@ -59,3 +59,12 @@ export function claimConsultRequest(consultId: string, anonToken?: string) {
 export function unlockEducationRequest(consultId: string) {
   return call<{ ok: true }>({ action: "unlock", consultId });
 }
+
+import type { Intake } from "@/lib/consult-types";
+
+export function startConsultRequest(intake: Intake) {
+  return call<{ consultId: string; anonToken?: string }>({
+    action: "start",
+    intake: intake as unknown as Json,
+  });
+}
