@@ -1,44 +1,71 @@
 
 
-The scanner's title is about `has_role`, but the actual exploitable risk it describes is the **`Consults: claim anonymous` UPDATE policy**. That policy currently lets any authenticated user claim any unclaimed anonymous consult just by knowing its UUID — no proof of `anon_token_hash` ownership is required at the database level. The same hole exists in the `claimConsult` server function's fallback branch (separate finding `claim_consult_idor`), which uses the service role to claim with no token check.
+## Fix — `prescriptions_realtime_no_rls_channel_auth`
 
-The previous `has_role` hardening pass already neutralized the parameter-ignore concern. So the right fix here is to close the consult-hijack path at both layers: RLS and the server function.
+### Root cause
+The `prescriptions` table is in the `supabase_realtime` publication, so any authenticated client can `supabase.channel(...).on('postgres_changes', { table: 'prescriptions' })` and receive every row change — including `draft`, `final`, `review_notes`. Postgres-level RLS on `prescriptions` does not gate Realtime broadcast; Realtime needs its own authorization on `realtime.messages`.
 
-### Fix plan
+### Investigation
+Let me first check whether the app actually uses Realtime on `prescriptions` — if nothing subscribes, the simplest fix is to remove the table from the publication entirely.
 
-**1. Database migration — remove the broad anonymous-claim path**
+Searching: `src/routes/_authenticated/_expert/expert.tsx`, `expert_.$prescriptionId.tsx`, `consult_.$consultId.index.tsx`, `consult_.$consultId.result.tsx` for `.channel(` / `postgres_changes` / `prescriptions`.
 
-Drop the existing wide-open RLS policy:
-- `Consults: claim anonymous` (UPDATE, USING `user_id IS NULL`, CHECK `auth.uid() = user_id`)
+Based on the codebase index (no realtime subscriptions visible in the earlier excerpts of `consult_.$consultId.index.tsx` / `result.tsx`, and the expert dashboard polls via queries), I'll verify this in the implementation pass. Two scenarios:
 
-We will NOT replace it with a token-checking RLS policy, because the `anon_token_hash` is a server-side secret and shouldn't be sent from the browser to PostgREST in the clear. Instead, all claims will go through the `claimConsult` server function (service role + token verification). The browser no longer needs RLS UPDATE access to anonymous consults at all.
+- **Scenario A (likely): no client uses Realtime on `prescriptions`.** Drop the table from the `supabase_realtime` publication. No app changes. Closes the finding completely.
+- **Scenario B: something does subscribe.** Keep it published but enable Realtime Authorization and add RLS policies on `realtime.messages` that only permit topics like `prescription:<consult_id>` for the consult owner or for users with `expert`/`admin` role.
 
-Owners can still update their own consults via the existing `Consults: owner can update own` policy (after claim). Experts/admins keep their existing policies.
+### Plan
 
-**2. Server function hardening — `src/lib/consult-server.ts`**
+**Step 1 — Migration (always run):** Remove `prescriptions` from the realtime publication. This is the safest default and matches what the code appears to do (no live subscription needed; expert reviews via fetch + manual refresh).
 
-Tighten `claimConsult`:
-- Require a valid `anonToken` whose SHA-256 matches the row's `anon_token_hash`. Without it, refuse.
-- Remove the unconditional fallback that claims any unowned consult by id alone.
-- Keep one narrow recovery path: if `anonToken` is missing, allow the claim **only** when the consult's `intake.contactEmail` matches the verified user's email (from the JWT). This preserves the "I lost my browser token but signed up with the same email" recovery flow without enabling UUID-based hijack.
+```sql
+alter publication supabase_realtime drop table public.prescriptions;
+```
 
-Update `src/lib/claim-consult.ts` consumers (already pass token) — no client API change required, just stricter server-side behavior.
+Also do the same for `consult_messages` and `consults` if they're in the publication and unused — I'll check during implementation and only drop ones that are actually published and unused.
 
-**3. Quick runtime-error fix (unrelated but blocking)**
+**Step 2 — Only if Scenario B turns out to be true** (a Realtime subscription on `prescriptions` exists in the client and removing it would break UX): keep the publication and instead enable Realtime Authorization with RLS on `realtime.messages`:
 
-`getConsult`/server functions are throwing "Missing Supabase server environment variables". The proxy in `client.server.ts` reads `process.env` lazily — this should work in the Worker, so the real cause is likely that the env isn't propagated in the current SSR runtime. I'll switch the lookup to also check `import.meta.env.SUPABASE_URL` / service key as a fallback before throwing, and verify after the migration runs. (If env truly isn't set, the user needs to confirm their Cloud secrets — they already exist per `<secrets>`, so this should resolve itself once we redeploy.)
+```sql
+-- Enable Realtime Authorization
+alter table realtime.messages enable row level security;
+
+create policy "Realtime: experts/admins can read prescription topics"
+on realtime.messages for select to authenticated
+using (
+  realtime.topic() like 'prescription:%'
+  and (has_role(auth.uid(), 'expert') or has_role(auth.uid(), 'admin'))
+);
+
+create policy "Realtime: owner can read own prescription topics"
+on realtime.messages for select to authenticated
+using (
+  realtime.topic() like 'prescription:%'
+  and exists (
+    select 1 from public.prescriptions p
+    join public.consults c on c.id = p.consult_id
+    where 'prescription:' || p.consult_id::text = realtime.topic()
+      and c.user_id = auth.uid()
+  )
+);
+```
+And refactor any client subscriptions to use private channels with `topic = 'prescription:<consult_id>'`.
 
 ### Files to change
-- New migration: `supabase/migrations/<ts>_lock_consult_claim.sql` — drop `Consults: claim anonymous`
-- `src/lib/consult-server.ts` — require token or verified-email match in `claimConsult`
+- New migration: `supabase/migrations/<ts>_lock_prescriptions_realtime.sql`
+- (Scenario B only) any route file that subscribes to `prescriptions` realtime
 
-### What this fixes
-- Closes `has_role_ignores_parameter` (the actual exploit path described — anonymous-consult hijack).
-- Closes the related `claim_consult_idor` finding in the same pass.
-- Preserves the legitimate flows: token-bearing browser claim, and email-verified recovery after sign-up.
+### Quick runtime-error note (also from current preview)
+The `Missing Supabase server environment variables` error in `client.server.ts` is unrelated to this finding but is breaking pages right now. I'll relax the lookup to also accept `import.meta.env.SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` as fallbacks before throwing, so SSR doesn't crash when the Worker's `process.env` shim is empty. Small, contained fix in the same pass.
 
-### Out of scope (separate findings, will tackle next if you want)
-- `prescriptions_realtime_no_rls_channel_auth` (Realtime channel auth)
-- `consult_messages_anon_no_select` (anonymous message read/write via server functions)
-- `user_purchases_owner_unrestricted_update` (lock down columns or move to server fn)
+### Out of scope (separate findings)
+- `has_role_ignores_user_id_parameter` (warn) — already neutralized for the exploit path; can revisit signature later.
+- `claim_consult_idor` — already fixed in the previous pass; will mark as resolved.
+- `consult_messages` anonymous read/write hardening.
+
+### Expected result
+- `prescriptions` no longer broadcasts row changes to arbitrary subscribers.
+- Security scan no longer reports `prescriptions_realtime_no_rls_channel_auth`.
+- No UX regression (expert dashboard already fetches on demand).
 
