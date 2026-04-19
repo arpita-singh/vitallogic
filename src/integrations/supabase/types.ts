@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      certified_materia_medica: {
+        Row: {
+          aust_l_number: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          price: number
+          product_name: string
+          stock_status: boolean
+          updated_at: string
+          vendor_name: string | null
+        }
+        Insert: {
+          aust_l_number?: string | null
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          price?: number
+          product_name: string
+          stock_status?: boolean
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Update: {
+          aust_l_number?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          price?: number
+          product_name?: string
+          stock_status?: boolean
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Relationships: []
+      }
       consult_messages: {
         Row: {
           consult_id: string
@@ -110,6 +149,7 @@ export type Database = {
       }
       prescriptions: {
         Row: {
+          attached_products: Json
           claimed_at: string | null
           claimed_by: string | null
           consult_id: string
@@ -124,6 +164,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attached_products?: Json
           claimed_at?: string | null
           claimed_by?: string | null
           consult_id: string
@@ -138,6 +179,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attached_products?: Json
           claimed_at?: string | null
           claimed_by?: string | null
           consult_id?: string
@@ -182,6 +224,36 @@ export type Database = {
           display_name?: string | null
           id?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      user_purchases: {
+        Row: {
+          consult_id: string | null
+          created_at: string
+          has_unlocked_education: boolean
+          id: string
+          purchased_medications: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          consult_id?: string | null
+          created_at?: string
+          has_unlocked_education?: boolean
+          id?: string
+          purchased_medications?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          consult_id?: string | null
+          created_at?: string
+          has_unlocked_education?: boolean
+          id?: string
+          purchased_medications?: Json
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
