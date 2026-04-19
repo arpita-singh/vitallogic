@@ -1,90 +1,74 @@
 
 
-# Phase 3 — AI Consult (Hybrid Intake → Chat → Draft Rx)
+# Phase 4 — Expert Review Dashboard
 
-## 1. Edge functions (2)
+## 1. Schema additions (1 small migration)
 
-**`supabase/functions/consult-chat/index.ts`** — streaming SSE chat
-- Public function (`verify_jwt = false`) — anonymous consults allowed.
-- Body: `{ consultId, messages }`. System prompt embedded server-side: Vital Logic philosophy (four pillars, "from medication to education"), modality awareness (Ayurveda / Western Naturopathy / Indigenous / Plant medicine), red-flag rules (chest pain, suicidal ideation, severe bleeding, pregnancy + contraindicated herbs → emergency referral), no-diagnosis disclaimer, encourages 3–5 follow-ups before suggesting prescription.
-- Calls Lovable AI Gateway with `google/gemini-3-flash-preview`, `stream: true`. Streams SSE back unchanged.
-- Persists user + assistant messages to `consult_messages` via service-role client AFTER stream completes (read body twice via tee, or buffer assistant text while streaming).
-- Handles 429 / 402 with friendly JSON errors.
+- Add `claimed_by uuid` + `claimed_at timestamptz` to `prescriptions` (nullable). Used to lock a prescription to one expert during review so two experts don't double-edit.
+- Add RLS policy `Prescriptions: experts can update claim` (already covered by existing experts-can-update-all, so no new policy needed — just the columns).
+- No other schema changes; `prescription_audit` already exists.
 
-**`supabase/functions/generate-prescription/index.ts`** — tool-calling draft Rx
-- Body: `{ consultId }`. Pulls intake + full message history.
-- Calls gateway with `tool_choice` forcing a `submit_prescription` function whose JSON schema is:
-  ```
-  { recommendations: [{
-      title, modality: "ayurveda"|"western_naturopathy"|"indigenous"|"plant_medicine"|"lifestyle",
-      rationale, suggested_products: [{name, form, dosage, notes}],
-      safety_notes, citations: [string]
-    }] (1–2 items),
-    summary, red_flags: [string], escalate: boolean }
-  ```
-- Inserts into `prescriptions` (status `escalated` if `escalate=true` or any red_flags, else `pending_review`). Updates parent consult status accordingly.
-- Returns `{ prescriptionId, status }`.
+## 2. Server functions (`src/lib/expert-server.ts`)
 
-## 2. Intake stepper (`src/routes/consult.tsx` — replace placeholder)
+All use `requireSupabaseAuth` middleware + check `has_role(userId, 'expert'|'admin')` server-side via the authenticated supabase client (RLS enforces it, but we double-check and return 403 on failure).
 
-Mobile-first card stepper, 5 steps, progress bar at top, sticky bottom CTA:
+- `listQueue({ filter: 'pending'|'escalated'|'mine'|'all' })` → joins `prescriptions` + `consults` + author profile, returns id, status, created_at, claimed_by, intake summary, red_flags count.
+- `getReviewDetail({ prescriptionId })` → returns `{ prescription, consult, messages[], audit[] }`.
+- `claimPrescription({ prescriptionId })` → sets `claimed_by=userId, claimed_at=now()` only if currently unclaimed (conditional update); writes `claim` row to `prescription_audit`.
+- `releasePrescription({ prescriptionId })` → clears claim if owned by caller.
+- `approvePrescription({ prescriptionId, final, notes? })` → status=`approved`, `final` jsonb, `reviewed_by/at`, also flips parent `consults.status='approved'`. Writes `approve` audit row with diff (draft → final).
+- `rejectPrescription({ prescriptionId, notes })` → status=`rejected` + consult `rejected`. Audit `reject`.
+- `escalatePrescription({ prescriptionId, notes })` → status=`escalated` + consult `escalated`. Audit `escalate`.
 
-1. **Symptoms** — chip multi-select (Headache, Fatigue, Sleep, Stress, Digestion, Pain, Mood, Skin, Hormonal, Other) + free-text textarea.
-2. **Duration & severity** — radio (Acute <2w / Subacute 2–8w / Chronic >8w) + severity slider 1–10.
-3. **Lifestyle** — sleep hours (slider), stress (1–5), diet (chips: omnivore/vegetarian/vegan/keto/other), activity level (1–5).
-4. **Safety** — current meds (textarea), allergies (textarea), pregnancy (yes/no/n-a), under 18 toggle.
-5. **Goals** — chip multi-select (Symptom relief / Prevention / Energy / Sleep / Education / Long-term wellness).
+Each mutation re-checks the caller still owns the claim (or that nobody owns it, for approve from unclaimed state we'll require claim first in UI).
 
-On final "Begin consult":
-- Server fn `startConsult({ intake })` inserts into `consults` (user_id from auth or null), inserts a system "intake summary" message, returns `consultId`. Navigate to `/consult/$consultId`.
+## 3. Routes
 
-## 3. Chat route (`src/routes/consult.$consultId.tsx`)
+**`/expert`** (replace placeholder at `src/routes/_authenticated/_expert/expert.tsx`)
+- Tabs: Pending · Escalated · Mine · All (drives `filter` search param via `validateSearch`).
+- Card list, mobile-friendly: status badge, age ("3h ago"), top symptoms, red-flag chip if any, claimed-by avatar/initials.
+- Empty state: "Queue is clear."
+- Realtime subscription on `prescriptions` (insert/update) → `router.invalidate()` so the list refreshes when another expert claims/approves.
 
-- Loads consult + messages via server fn.
-- Renders intake summary card at top (collapsible), then message list with `react-markdown`.
-- Token-by-token SSE streaming using the pattern from the AI Gateway docs (line-by-line parse, update last assistant message in place).
-- Composer at bottom (mobile-safe, `pb-[env(safe-area-inset-bottom)]`).
-- "Generate my recommendation" button appears after ≥3 user turns. Calls `generate-prescription` (non-stream `supabase.functions.invoke`). On success → navigate to `/consult/$consultId/result`.
-- Toasts for 429 ("Slow down — try again in a moment") and 402 ("AI credits exhausted — please add credits").
+**`/expert/$prescriptionId`** (new file `src/routes/_authenticated/_expert/expert.$prescriptionId.tsx`)
+- Three-section layout (stacked on mobile, two-column ≥md):
+  1. **Intake summary** — pretty-rendered from `consults.intake` jsonb, plus consult age and author email/display name.
+  2. **Conversation** — full `consult_messages` list using existing `ChatMessage` component, scrollable, read-only.
+  3. **Draft recommendation editor** — form initialized from `prescription.draft`. Each recommendation card is editable: title, modality (select), rationale (textarea), products (add/remove rows: name/form/dosage/notes), safety_notes, citations (one per line). Plus top-level `summary`, `red_flags` chips, `escalate` toggle.
+- Action bar (sticky bottom on mobile):
+  - If unclaimed → **Claim for review** (primary). Other actions disabled.
+  - If claimed by current user → **Approve**, **Reject** (requires notes), **Escalate** (requires notes), **Release**.
+  - If claimed by someone else → read-only banner "Claimed by {name} — only they can act."
+- Audit trail panel (collapsible at bottom): list of `prescription_audit` rows with actor, action, timestamp.
 
-## 4. Result route (`src/routes/consult.$consultId.result.tsx`)
+## 4. Header & UX touches
 
-- Pulls latest prescription for the consult.
-- If `pending_review` / `escalated`: shows the "Awaiting human review" card (lotus + pulsing gold ring, estimated wait, prompt to sign up if anonymous so result can be sent to account).
-- If `approved`: renders the `final` recommendations (or `draft` fallback) with modality badges, rationale, products, safety notes, citations, and footer disclaimer.
-- If `rejected`: gentle message advising professional clinician.
+- Header already shows "Expert" link for experts/admins (Phase 2). Add a small queue-count badge — fetched via lightweight server fn `getQueueCount()` cached 30s.
+- Toasts via `sonner` for every action result (success / failure / "another expert just claimed this").
 
-## 5. Account → My consults (`src/routes/_authenticated/account.tsx`)
+## 5. Account page additions
 
-- Add a "Your consults" section listing the user's consults (status badge, created date, link to `/consult/$id/result`).
+- The user-side `account.tsx` already lists consults; once approval flips `consults.status='approved'` the existing UI just works. No changes needed beyond confirming the status badge styles cover all five statuses.
 
-## 6. Anonymous → account claim
+## 6. Realtime updates on result page
 
-- If user signs up while having an anonymous `consultId` in `localStorage` (`vl_consult_id`), a server fn `claimConsult({ consultId })` sets `consults.user_id = auth.uid()` (allowed because owner-update policy permits null→self via a small RLS update — we'll add an `update` policy `Consults: claim anonymous` allowing update when current `user_id IS NULL` and `auth.uid()` is being set).
+- Add a `supabase.channel` subscription on `prescriptions` filtered by `consult_id` to `src/routes/consult.$consultId.result.tsx` so users awaiting review auto-transition to the approved view without refresh.
 
-## 7. Migration (small)
-
-- New RLS policy on `consults` to allow anonymous → owner claim (`USING user_id IS NULL` + `WITH CHECK auth.uid() = user_id`).
-- `supabase/config.toml`: add blocks for both functions with `verify_jwt = false`.
-
-## 8. Files
+## 7. Files
 
 **New**
-- `supabase/functions/consult-chat/index.ts`
-- `supabase/functions/generate-prescription/index.ts`
-- `src/routes/consult.$consultId.tsx`
-- `src/routes/consult.$consultId.result.tsx`
-- `src/lib/consult-server.ts` (`createServerFn` wrappers: `startConsult`, `getConsult`, `claimConsult`, `listMyConsults`)
-- `src/components/consult/intake-stepper.tsx`
-- `src/components/consult/chat-message.tsx`
-- `src/components/consult/modality-badge.tsx`
-- One migration file (claim policy + config blocks via config.toml edit)
+- `src/routes/_authenticated/_expert/expert.$prescriptionId.tsx`
+- `src/lib/expert-server.ts` (all server fns above)
+- `src/components/expert/queue-card.tsx`
+- `src/components/expert/recommendation-editor.tsx`
+- `src/components/expert/audit-trail.tsx`
+- One migration: add `claimed_by`, `claimed_at` columns to `prescriptions`
 
 **Edit**
-- `src/routes/consult.tsx` (replace stub with stepper)
-- `src/routes/_authenticated/account.tsx` (add consults list)
-- `supabase/config.toml` (function blocks)
+- `src/routes/_authenticated/_expert/expert.tsx` (replace placeholder with real queue + tabs + realtime)
+- `src/components/site-header.tsx` (queue-count badge for experts)
+- `src/routes/consult.$consultId.result.tsx` (realtime auto-refresh on approval)
 
-## 9. Out of scope (Phase 4)
-Expert review actions (claim/approve/reject/escalate UI), audit writes from expert dashboard, realtime queue updates, email notifications.
+## 8. Out of scope (Phase 5)
+Email/SMS notifications when prescription approved, senior-expert escalation routing, expert performance analytics, marketplace (Pillar 3), education packages (Pillar 4).
 
