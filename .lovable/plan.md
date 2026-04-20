@@ -1,63 +1,44 @@
 
 
-This is a research/advice question, not an implementation task. The user wants to understand:
-1. What's on GitHub vs Lovable for their Vital Logic project
-2. How to move it local and run it with Ollama + Claude
+User wants their actual table data exported as CSV — this is a one-off data export task, not a feature build. They mentioned earlier they want to migrate this product locally, so this is the data-export step from `MIGRATION.md`.
 
-Let me give a direct, honest answer rather than a build plan.
+The 11 tables to export (from the schema above):
+1. `certified_materia_medica`
+2. `consult_messages`
+3. `consults`
+4. `prescription_audit`
+5. `prescriptions`
+6. `profiles`
+7. `role_audit_log`
+8. `user_purchases`
+9. `user_roles`
+10. `wisdom_protocols`
+11. `wisdom_sources`
 
-## The split: GitHub vs Lovable
+Plus `auth.users` (separate — Supabase admin schema, contains emails/OAuth identities needed for migration).
 
-**100% of your code lives in GitHub** — once you've connected the GitHub integration, every file in this project (every `.tsx` route, edge function, migration, asset) is mirrored to your repo in real time. There is no "Lovable-only" code. The two-way sync means GitHub is a complete copy.
+## Plan
 
-**What is NOT in GitHub** (lives in Lovable Cloud / Supabase, not your repo):
-- **Database data** — every row in `consults`, `prescriptions`, `user_roles`, `role_audit_log`, `user_purchases`, `profiles`, etc. (schema is in `supabase/migrations/`, but the *data* isn't)
-- **Auth users** — the `auth.users` table (emails, password hashes, OAuth links)
-- **Storage objects** — any uploaded files in storage buckets
-- **Secrets** — `LOVABLE_API_KEY`, any other env secrets configured in Cloud
-- **Deployed edge function runtime** — source is in `supabase/functions/`, but the running deployment is on Supabase's edge
-- **Lovable-managed config** — `.env`, `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts` (auto-generated, not committed in the usual way)
+A one-off export job — no code changes, no feature build. I'll:
 
-So the rough split is: **~100% of source code in GitHub, ~0% Lovable-exclusive code**, but **runtime state (DB rows, users, secrets) lives in Lovable Cloud**.
+1. Query each public table via `supabase--read_query` (SELECT *) and write each result to `/mnt/documents/exports/{table}.csv`
+2. Query `auth.users` for the minimum migration-relevant fields (`id`, `email`, `created_at`, `last_sign_in_at`, `raw_user_meta_data`, `raw_app_meta_data`) — **without** password hashes (those are not exposed via read_query and need a separate Supabase dashboard export)
+3. Bundle everything into `/mnt/documents/vital-logic-data-export.zip` for one-click download
+4. Include a short `README.txt` in the zip explaining: row counts per table, column order, the auth.users caveat (password hashes need separate export), and the import command snippet (`\copy public.{table} FROM '{table}.csv' CSV HEADER`)
+5. Emit each CSV + the zip as `<lov-artifact>` tags so they're downloadable
 
-## Moving local + Ollama + Claude — the honest assessment
+### What you get
+- 11 individual `.csv` files (one per public table)
+- 1 `auth_users.csv` (metadata only, no password hashes)
+- 1 `README.txt` with row counts + import instructions
+- 1 `vital-logic-data-export.zip` bundling all of the above
 
-What works straightforwardly:
-- **Clone from GitHub, run Vite locally** — `bun install && bun dev` will boot the frontend
-- **Point at a self-hosted Supabase** (Docker) for DB + auth + storage — you'd export your current schema (already in `supabase/migrations/`) and re-apply, then export data via Cloud → Database → export CSV
-- **Replace Lovable AI Gateway with Ollama or Claude** — your only AI integration today is in `supabase/functions/consult-chat/index.ts` and `supabase/functions/generate-prescription/index.ts`, both of which call `https://ai.gateway.lovable.dev/v1/chat/completions` with `LOVABLE_API_KEY`. Swap the URL + auth header for either:
-  - **Ollama**: `http://localhost:11434/v1/chat/completions` (OpenAI-compatible, no key) — model name like `llama3.1` or `qwen2.5`
-  - **Claude (Anthropic)**: `https://api.anthropic.com/v1/messages` — different request/response shape, needs a small adapter, plus `ANTHROPIC_API_KEY`
+### Caveats I'll call out
+- **Password hashes**: not included. Export them via Supabase Dashboard → Authentication → Users → Export, or users will need to re-set passwords / re-link OAuth on the local instance.
+- **Storage objects**: none configured in this project — nothing to export.
+- **Edge function secrets**: not data, must be re-created locally per `MIGRATION.md`.
+- **Schema**: already in `supabase/migrations/` — `supabase db reset` re-applies it locally.
 
-What's harder:
-- **Edge function runtime** — Supabase edge functions are Deno; running them locally needs the Supabase CLI (`supabase start` + `supabase functions serve`). Workable but a setup step.
-- **Auth** — Google OAuth callback URLs are tied to your hosted domain; you'd reconfigure the OAuth app for `http://localhost:54321/auth/v1/callback`.
-- **Data migration** — you have to manually export each table's CSV from Cloud and `\copy` into local Postgres. The `auth.users` table is trickier (password hashes are exportable but require care).
-- **Streaming** — Ollama's OpenAI-compatible streaming works; Claude's native streaming uses a different SSE shape (your `consult-chat` SSE parser would need a small fork for Claude).
-
-## What I'd build for you (when you approve)
-
-A short, honest migration plan rather than code edits:
-
-1. **Repo audit doc** — generate `MIGRATION.md` listing every Lovable-Cloud-coupled touchpoint (each `supabase/functions/*`, every table referenced in code, every `LOVABLE_*` env var) so you have a single checklist.
-2. **AI provider abstraction** — refactor `consult-chat` and `generate-prescription` to call a shared `callLLM({ provider, model, messages, stream })` helper that supports `lovable | ollama | anthropic`, switched by an env var. Default stays `lovable` so your hosted app keeps working; locally you flip to `ollama` or `anthropic`.
-3. **Local-dev README** — step-by-step: clone, `supabase init` + `supabase start`, apply migrations, env file template (`OLLAMA_BASE_URL`, `ANTHROPIC_API_KEY`, etc.), data import notes.
-4. **Optional: Docker compose** — one-shot bring-up (Postgres + Supabase services + Ollama container) so a fresh machine boots in one command.
-
-None of this disconnects you from Lovable — your hosted app keeps working while you also have a fully local fork. You can disable Lovable Cloud entirely later if you want to fully self-host (note: Cloud cannot be re-disabled inside Lovable for *future projects* in the same workspace — see Connectors → Lovable Cloud).
-
-### Files I'd touch
-- New: `MIGRATION.md` (root)
-- New: `README.local.md` (local-dev guide)
-- Edit: `supabase/functions/consult-chat/index.ts` (provider switch)
-- Edit: `supabase/functions/generate-prescription/index.ts` (provider switch)
-- New: `supabase/functions/_shared/llm.ts` (provider abstraction)
-- Optional: `docker-compose.local.yml`
-
-### Verification (after you approve and I implement)
-1. Hosted app still uses Lovable AI by default and works unchanged
-2. Setting `LLM_PROVIDER=ollama` + `OLLAMA_BASE_URL=http://host.docker.internal:11434` routes consult-chat to local Ollama
-3. Setting `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...` routes to Claude with streaming working
-4. `MIGRATION.md` lists every Cloud-coupled file with a one-line action for each
-5. Following `README.local.md` on a clean machine boots the full stack
+### Files touched
+None in the repo. Output goes to `/mnt/documents/exports/` + a zip at `/mnt/documents/vital-logic-data-export.zip`.
 
