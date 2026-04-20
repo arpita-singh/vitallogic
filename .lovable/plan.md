@@ -1,68 +1,63 @@
 
 
-User wants "Prescribe" renamed to "Recommend" across the public-facing pillar content because they aren't legally prescribing — this is an important regulatory/claim-language correction (TGA-relevant). However, "prescribe/prescription" is also used as internal technical terminology throughout the codebase (table names, route names, edge functions, expert workflow). I need to scope this carefully.
+This is a research/advice question, not an implementation task. The user wants to understand:
+1. What's on GitHub vs Lovable for their Vital Logic project
+2. How to move it local and run it with Ollama + Claude
 
-## Scope decision
+Let me give a direct, honest answer rather than a build plan.
 
-**User-facing language (CHANGE):** marketing/content pages where patients see the pillar described.
+## The split: GitHub vs Lovable
 
-**Internal/technical (KEEP):** database tables (`prescriptions`, `prescription_audit`), routes (`/expert/$prescriptionId`), edge function names (`generate-prescription`), component names (`prescription-review-modal`), expert-side UI labels. Renaming these would be a massive churn for zero user-visible benefit and would risk breaking the audit trail. Experts internally still "review prescriptions" as a workflow concept — that's fine, only patients see the pillar wording.
+**100% of your code lives in GitHub** — once you've connected the GitHub integration, every file in this project (every `.tsx` route, edge function, migration, asset) is mirrored to your repo in real time. There is no "Lovable-only" code. The two-way sync means GitHub is a complete copy.
 
-Let me verify the user-facing surfaces by searching.
-<lov-tool-use id="toolu_vrtx_01U8c7BayXCbnj2ZtuU6S8Mu" name="code--search_files" integration-id="code" data="{\"query\": \"Prescribe\", \"include_patterns\": \"src/routes/**/*.tsx,src/components/**/*.tsx,index.html\", \"exclude_dirs\": \"_authenticated\"}">
-</lov-tool-use>
+**What is NOT in GitHub** (lives in Lovable Cloud / Supabase, not your repo):
+- **Database data** — every row in `consults`, `prescriptions`, `user_roles`, `role_audit_log`, `user_purchases`, `profiles`, etc. (schema is in `supabase/migrations/`, but the *data* isn't)
+- **Auth users** — the `auth.users` table (emails, password hashes, OAuth links)
+- **Storage objects** — any uploaded files in storage buckets
+- **Secrets** — `LOVABLE_API_KEY`, any other env secrets configured in Cloud
+- **Deployed edge function runtime** — source is in `supabase/functions/`, but the running deployment is on Supabase's edge
+- **Lovable-managed config** — `.env`, `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts` (auto-generated, not committed in the usual way)
 
-<lov-tool-use id="toolu_vrtx_01DPnv7ZETqoRjauN87jEEuX" name="code--search_files" integration-id="code" data="{\"query\": \"prescri\", \"include_patterns\": \"src/routes/index.tsx,src/routes/journey.tsx,src/routes/philosophy.tsx,src/routes/pillars.tsx,src/routes/origins.tsx,src/routes/integrity.tsx,src/components/site-header.tsx,src/components/site-footer.tsx,src/routes/__root.tsx,index.html,README.md\"}">
-</lov-tool-use>
+So the rough split is: **~100% of source code in GitHub, ~0% Lovable-exclusive code**, but **runtime state (DB rows, users, secrets) lives in Lovable Cloud**.
 
-<lov-tool-use id="toolu_vrtx_01MX1XirMDU4z1ZmtziH3Gvz" name="code--search_files" integration-id="code" data="{\"query\": \"Prescribe|prescribe|Prescription\", \"include_patterns\": \"src/routes/index.tsx,src/routes/journey.tsx,src/routes/philosophy.tsx,src/routes/pillars.tsx,src/routes/origins.tsx,src/routes/integrity.tsx,src/components/site-header.tsx,src/components/site-footer.tsx,src/routes/__root.tsx,src/routes/consult.tsx,index.html,README.md\"}">
-</lov-tool-use>
-Good — this is a patient-facing terminology change. The user wants "Prescribe" → "Recommend" on public-facing pillar copy because they're not actually prescribing. The internal `prescriptions` DB table, expert routes, and edge functions are technical names that don't show to patients — those should stay (changing them is a huge lift with no benefit). Let me confirm the scope of public-facing usage.
-<lov-tool-use id="toolu_vrtx_0179TYvcFh3jDzJCq6ARWuzu" name="code--view" integration-id="code" data="{\"file_path\": \"src/routes/index.tsx\", \"lines\": \"25-95\"}">
-</lov-tool-use>
+## Moving local + Ollama + Claude — the honest assessment
 
-<lov-tool-use id="toolu_vrtx_01E5w6JbHKdhFV7kg4FHzWas" name="code--view" integration-id="code" data="{\"file_path\": \"src/routes/integrity.tsx\", \"lines\": \"20-40\"}">
-</lov-tool-use>
+What works straightforwardly:
+- **Clone from GitHub, run Vite locally** — `bun install && bun dev` will boot the frontend
+- **Point at a self-hosted Supabase** (Docker) for DB + auth + storage — you'd export your current schema (already in `supabase/migrations/`) and re-apply, then export data via Cloud → Database → export CSV
+- **Replace Lovable AI Gateway with Ollama or Claude** — your only AI integration today is in `supabase/functions/consult-chat/index.ts` and `supabase/functions/generate-prescription/index.ts`, both of which call `https://ai.gateway.lovable.dev/v1/chat/completions` with `LOVABLE_API_KEY`. Swap the URL + auth header for either:
+  - **Ollama**: `http://localhost:11434/v1/chat/completions` (OpenAI-compatible, no key) — model name like `llama3.1` or `qwen2.5`
+  - **Claude (Anthropic)**: `https://api.anthropic.com/v1/messages` — different request/response shape, needs a small adapter, plus `ANTHROPIC_API_KEY`
 
-<lov-tool-use id="toolu_vrtx_012yuzRv1UVwt1e91MjyycP3" name="code--view" integration-id="code" data="{\"file_path\": \"src/routes/philosophy.tsx\", \"lines\": \"30-70\"}">
-</lov-tool-use>
-<lov-plan>
+What's harder:
+- **Edge function runtime** — Supabase edge functions are Deno; running them locally needs the Supabase CLI (`supabase start` + `supabase functions serve`). Workable but a setup step.
+- **Auth** — Google OAuth callback URLs are tied to your hosted domain; you'd reconfigure the OAuth app for `http://localhost:54321/auth/v1/callback`.
+- **Data migration** — you have to manually export each table's CSV from Cloud and `\copy` into local Postgres. The `auth.users` table is trickier (password hashes are exportable but require care).
+- **Streaming** — Ollama's OpenAI-compatible streaming works; Claude's native streaming uses a different SSE shape (your `consult-chat` SSE parser would need a small fork for Claude).
 
-User says "I'm not prescribing anything" — this is a regulatory/positioning concern, not a database refactor. "Prescribe" implies medical authority they don't claim. Public-facing copy should say "Recommend"; internal DB tables (`prescriptions`, `prescription_audit`) and expert-tool labels can stay as engineering names since patients never see them, and renaming the schema is high-risk for zero patient benefit.
+## What I'd build for you (when you approve)
 
-But there's nuance: a few patient-facing strings *also* use the word "prescription" (homepage CTA "Sign in to view your prescription"). Those should change too for consistency with the new positioning.
+A short, honest migration plan rather than code edits:
 
-## Scope — patient-facing copy only
+1. **Repo audit doc** — generate `MIGRATION.md` listing every Lovable-Cloud-coupled touchpoint (each `supabase/functions/*`, every table referenced in code, every `LOVABLE_*` env var) so you have a single checklist.
+2. **AI provider abstraction** — refactor `consult-chat` and `generate-prescription` to call a shared `callLLM({ provider, model, messages, stream })` helper that supports `lovable | ollama | anthropic`, switched by an env var. Default stays `lovable` so your hosted app keeps working; locally you flip to `ollama` or `anthropic`.
+3. **Local-dev README** — step-by-step: clone, `supabase init` + `supabase start`, apply migrations, env file template (`OLLAMA_BASE_URL`, `ANTHROPIC_API_KEY`, etc.), data import notes.
+4. **Optional: Docker compose** — one-shot bring-up (Postgres + Supabase services + Ollama container) so a fresh machine boots in one command.
 
-**Pillar rename: "Prescribe" → "Recommend"**
-- `src/routes/index.tsx` line 31 — pillar card title + tagline
-- `src/routes/pillars.tsx` lines 12, 17, 33 — meta description, og:description, Pillar 02 title
-- `src/routes/index.tsx` line 84 — "Sign in to view your prescription" → "Sign in to view your recommendation"
-- `src/routes/integrity.tsx` line 28 — "No prescription reaches you…" → "No recommendation reaches you…"
-- `src/routes/philosophy.tsx` line 62 — "Tools over prescriptions" → "Tools over prescriptions" stays (it's a critique of conventional medicine, contextually correct) — leave as-is
-- `src/routes/philosophy.tsx` line 37 — "prescribe a molecule" stays (also a critique of conventional medicine) — leave as-is
+None of this disconnects you from Lovable — your hosted app keeps working while you also have a fully local fork. You can disable Lovable Cloud entirely later if you want to fully self-host (note: Cloud cannot be re-disabled inside Lovable for *future projects* in the same workspace — see Connectors → Lovable Cloud).
 
-**Patient consult flow** — quick scan of `consult.tsx` and `consult_.$consultId.result.tsx` for any user-visible "prescription" / "prescribe" strings; rename to "recommendation" / "recommend" where they appear in copy (not variable names).
+### Files I'd touch
+- New: `MIGRATION.md` (root)
+- New: `README.local.md` (local-dev guide)
+- Edit: `supabase/functions/consult-chat/index.ts` (provider switch)
+- Edit: `supabase/functions/generate-prescription/index.ts` (provider switch)
+- New: `supabase/functions/_shared/llm.ts` (provider abstraction)
+- Optional: `docker-compose.local.yml`
 
-**Out of scope (intentionally untouched)**
-- Database tables, columns, RLS policies (`prescriptions`, `prescription_audit`, `prescriptions.status`)
-- Edge function names (`generate-prescription`)
-- Expert-side routes & UI (`/expert/$prescriptionId`, queue cards) — internal practitioner tooling, "prescription" is the right professional term there
-- TypeScript types, variable names, route param names
-- README technical docs
-- Changelog history
-
-### Files touched
-- `src/routes/index.tsx` (pillar card + sign-in line)
-- `src/routes/pillars.tsx` (Pillar 02 title, body tag, meta tags)
-- `src/routes/integrity.tsx` (guarantee #1 copy)
-- `src/routes/consult.tsx` + `src/routes/consult_.$consultId.result.tsx` (any patient-visible copy — confirmed during edit)
-
-### Verification
-1. Homepage pillar grid shows "Recommend" as Pillar 02
-2. `/pillars` page shows "Recommend" with updated body + meta tags (view source for og:title)
-3. `/integrity` guarantee reads "No recommendation reaches you…"
-4. Patient consult result page uses "recommendation" not "prescription" in headings/CTAs
-5. Expert dashboard at `/expert` is unchanged (still says "Prescription review" — internal tool)
-6. No broken imports / DB queries (table names untouched)
+### Verification (after you approve and I implement)
+1. Hosted app still uses Lovable AI by default and works unchanged
+2. Setting `LLM_PROVIDER=ollama` + `OLLAMA_BASE_URL=http://host.docker.internal:11434` routes consult-chat to local Ollama
+3. Setting `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY=...` routes to Claude with streaming working
+4. `MIGRATION.md` lists every Cloud-coupled file with a one-line action for each
+5. Following `README.local.md` on a clean machine boots the full stack
 
