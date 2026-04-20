@@ -1,56 +1,68 @@
 
 
-## Goal
-Document the recent VitalLogic changes (anonymous consult flow, stale-session fix, Slice B safety guardrails) so they're visible on GitHub.
+## What's actually happening
 
-## Option 1 — Add a CHANGELOG.md in the repo (Lovable does this)
-Create `CHANGELOG.md` at the project root following the **Keep a Changelog** convention. Seed it with one `## [Unreleased]` section covering what's shipped since the last quiet point:
+I checked the data. Two real problems, both UX gaps in the current design — nothing is bug-broken.
 
-```
-## [Unreleased] — 2026-04-20
+### Problem 1 — Expert can't click "In progress" drafts
 
-### Added
-- Safety guardrails column (`safety_guardrails` JSONB) on `certified_materia_medica`
-- Auto safety filter in `generate-prescription` (pregnancy, breastfeeding, under-18,
-  hyperthyroid, autoimmune, drug-interaction matching against intake)
-- "Safety filter applied" disclosure on the patient result page
-- "Auto safety filter" audit block in the expert review modal
-- Anonymous consult support with `anonToken` stored in localStorage
-- `consult-access` edge function consolidating start/read/saveContact/claim/unlock
+In `src/components/expert/queue-card.tsx` lines 118–120, draft items are rendered as a plain `<div>` instead of a `<Link>`:
 
-### Fixed
-- Stale-session loop on `/consult/$id/result` — client now revalidates the cached
-  session against the auth server on init and signs out locally if revoked
-- Toast spam from `claimSpecificConsult` on 401 responses
-
-### Changed
-- Replaced `consult-server.ts` + `consult-schema.ts` with `consult-access.ts`
-  + `consult-types.ts` (smaller surface, single source of truth)
+```tsx
+if (item.isDraft) {
+  return <div className={cardClass}>{inner}</div>;
+}
 ```
 
-I'll also add a short note at the top of `README.md` linking to it ("See `CHANGELOG.md` for release notes").
+This is intentional — the expert detail page (`/expert/$prescriptionId`) is keyed on a prescription ID, and drafts have no prescription row yet. So there's literally nowhere for the link to go.
 
-After Lovable writes these files, the GitHub sync pushes them automatically. They'll be visible on your repo's homepage within seconds.
+### Problem 2 — Patient doesn't see their draft consult
 
-## Option 2 — Cut a real GitHub Release (you do this, ~30 seconds)
-Lovable can't do this part, but it's quick:
+Database confirms it. User `arpita.singh.syd@gmail.com` (id `c39d32f2…`) has:
 
-1. On GitHub, open your repo → **Releases** (right sidebar) → **Draft a new release**.
-2. **Choose a tag** → type `v0.2.0` (or whatever version) → "Create new tag on publish".
-3. **Release title**: `v0.2.0 — Safety guardrails & stale-session fix`
-4. Click **Generate release notes** (GitHub auto-fills from commits since the last release), or paste the `## [Unreleased]` section from the CHANGELOG.
-5. **Publish release**.
+- 1 approved consult (`c556559a…`) — visible on her account ✅
+- The "Digestion" draft (`ca60a163…`) you see in the expert queue has `user_id = NULL` — it was started **anonymously**, contact email `arpita.singh.syd@gmail.com` was captured, but it was never claimed to her account.
 
-This is the canonical "release notes" surface on GitHub and shows up under your repo's Releases tab, RSS feed, and the sidebar.
+Her account page only queries `consults WHERE user_id = <her id>`, so anonymous drafts aren't visible. The "one consult at a time" perception is correct under the current rules: anonymous consults attach to your account only when (a) you sign up/in with the same browser session that started them (via the `vl_pending_consult_id` localStorage pointer), or (b) you open the consult URL directly.
 
-## Recommendation
-Do **both**: let me create `CHANGELOG.md` now (Option 1) so the notes live in the repo as the source of truth, then you copy that section into a GitHub Release (Option 2) when you want a tagged milestone. The CHANGELOG also makes future releases trivial — you just promote `[Unreleased]` to a new version heading.
+So she has multiple consults — the system just doesn't link them to her account because they were started in different browser sessions without the localStorage pointer.
 
-## Files I'd touch (Option 1 only)
-- Create `CHANGELOG.md` (new, ~40 lines)
-- Edit `README.md` — add a one-line "See CHANGELOG.md for release notes" near the top
+## The fix — two narrowly-scoped changes
+
+### Fix 1 — Make draft consults openable from the expert queue
+
+Add a new expert route `/expert/consult/$consultId` that shows the in-progress consult (intake + chat history so far + contact details) as **read-only**, with one primary action: "Generate prescription now". Clicking it calls the existing `generate-prescription` edge function, creates the `prescriptions` row, and redirects to the normal `/expert/$prescriptionId` review screen.
+
+In `queue-card.tsx`, change the draft branch to a `<Link to="/expert/consult/$consultId">` instead of the plain `<div>`.
+
+This unblocks the expert to: see what the patient said, contact them via the captured email, or push them through to a draft prescription manually.
+
+### Fix 2 — Auto-attach anonymous consults by email when a matching user signs in
+
+When a user signs in or signs up, after the existing `claimPendingConsult` (which uses the localStorage pointer), also run a server-side lookup: any `consults` row where `user_id IS NULL` AND `intake->>'contactEmail' = <signed-in user's email>` gets attached to their account.
+
+This is **opt-in by behavior** — the patient already typed their email into the consult form, so attaching by email match is exactly what they expect. We do it server-side in a new `consult-access` action `claimByEmail` (using the auth-validated JWT email; never trusting client-supplied email) so we don't widen RLS.
+
+Account page now shows all of Arpita's consults — both the historical approved one and any drafts she started anonymously.
+
+## Files I'll touch
+
+- `src/components/expert/queue-card.tsx` — make draft cards link to the new route
+- `src/routes/_authenticated/_expert/expert_.consult.$consultId.tsx` — new read-only draft viewer + "Generate prescription" action
+- `supabase/functions/consult-access/index.ts` — add `claimByEmail` action: find unattached consults matching the caller's verified email, set `user_id` to the caller
+- `src/lib/consult-access.ts` — add `claimByEmail()` client wrapper
+- `src/lib/auth.tsx` — call `claimByEmail()` after `claimPendingConsult()` in both `signIn` and `signUp`
+- `src/routes/_authenticated/account.tsx` — also call `claimByEmail()` on mount as a safety net for already-signed-in users (covers Arpita's case right now)
 
 ## Out of scope
-- Creating git tags or GitHub Releases from inside Lovable (not supported by the integration)
-- Auto-generating notes from commit history (would need a CI workflow like `release-please` — happy to set that up as a follow-up if you want it automated)
+
+- No schema changes, no new tables, no RLS rewrites.
+- Not building "merge two accounts" — only attaches anonymous (`user_id IS NULL`) consults; never reassigns one user's consults to another.
+- Not auto-claiming prescriptions in the expert queue (that's a separate workflow decision).
+
+## Verification once shipped
+
+1. **Expert side:** click the "Digestion" draft card → land on the new draft viewer → see Arpita's intake + email + any chat → optionally click "Generate prescription" and land on the standard review page.
+2. **Patient side:** Arpita refreshes `/account` → the Digestion draft now appears under "Your consults" with status "In progress" and links to `/consult/ca60a163…` so she can finish it.
+3. **Safety:** start a new anonymous consult with a random email, sign in as Arpita, confirm that consult does NOT attach (email mismatch).
 
