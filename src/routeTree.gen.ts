@@ -30,6 +30,7 @@ import { Route as ConsultConsultIdIndexRouteImport } from './routes/consult_.$co
 import { Route as ConsultConsultIdResultRouteImport } from './routes/consult_.$consultId.result'
 import { Route as AuthenticatedExpertExpertRouteImport } from './routes/_authenticated/_expert/expert'
 import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert_.$prescriptionId'
+import { Route as AuthenticatedExpertExpertCatalogRouteImport } from './routes/_authenticated/_expert/expert.catalog'
 import { Route as AuthenticatedExpertExpertConsultConsultIdRouteImport } from './routes/_authenticated/_expert/expert_.consult.$consultId'
 
 const UnauthorizedRoute = UnauthorizedRouteImport.update({
@@ -138,6 +139,12 @@ const AuthenticatedExpertExpertPrescriptionIdRoute =
     path: '/expert/$prescriptionId',
     getParentRoute: () => AuthenticatedExpertRoute,
   } as any)
+const AuthenticatedExpertExpertCatalogRoute =
+  AuthenticatedExpertExpertCatalogRouteImport.update({
+    id: '/catalog',
+    path: '/catalog',
+    getParentRoute: () => AuthenticatedExpertExpertRoute,
+  } as any)
 const AuthenticatedExpertExpertConsultConsultIdRoute =
   AuthenticatedExpertExpertConsultConsultIdRouteImport.update({
     id: '/expert_/consult/$consultId',
@@ -161,9 +168,10 @@ export interface FileRoutesByFullPath {
   '/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/consult/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/expert': typeof AuthenticatedExpertExpertRoute
+  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
   '/consult/$consultId/': typeof ConsultConsultIdIndexRoute
+  '/expert/catalog': typeof AuthenticatedExpertExpertCatalogRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/expert/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -182,9 +190,10 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/auth/callback': typeof AuthCallbackRoute
-  '/expert': typeof AuthenticatedExpertExpertRoute
+  '/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult/$consultId/result': typeof ConsultConsultIdResultRoute
   '/consult/$consultId': typeof ConsultConsultIdIndexRoute
+  '/expert/catalog': typeof AuthenticatedExpertExpertCatalogRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/expert/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -207,9 +216,10 @@ export interface FileRoutesById {
   '/_authenticated/owner-manual': typeof AuthenticatedOwnerManualRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/consult_/$consultId': typeof ConsultConsultIdRouteWithChildren
-  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRoute
+  '/_authenticated/_expert/expert': typeof AuthenticatedExpertExpertRouteWithChildren
   '/consult_/$consultId/result': typeof ConsultConsultIdResultRoute
   '/consult_/$consultId/': typeof ConsultConsultIdIndexRoute
+  '/_authenticated/_expert/expert/catalog': typeof AuthenticatedExpertExpertCatalogRoute
   '/_authenticated/_expert/expert_/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/_authenticated/_expert/expert_/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -234,6 +244,7 @@ export interface FileRouteTypes {
     | '/expert'
     | '/consult/$consultId/result'
     | '/consult/$consultId/'
+    | '/expert/catalog'
     | '/expert/$prescriptionId'
     | '/expert/consult/$consultId'
   fileRoutesByTo: FileRoutesByTo
@@ -255,6 +266,7 @@ export interface FileRouteTypes {
     | '/expert'
     | '/consult/$consultId/result'
     | '/consult/$consultId'
+    | '/expert/catalog'
     | '/expert/$prescriptionId'
     | '/expert/consult/$consultId'
   id:
@@ -279,6 +291,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_expert/expert'
     | '/consult_/$consultId/result'
     | '/consult_/$consultId/'
+    | '/_authenticated/_expert/expert/catalog'
     | '/_authenticated/_expert/expert_/$prescriptionId'
     | '/_authenticated/_expert/expert_/consult/$consultId'
   fileRoutesById: FileRoutesById
@@ -449,6 +462,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertExpertPrescriptionIdRouteImport
       parentRoute: typeof AuthenticatedExpertRoute
     }
+    '/_authenticated/_expert/expert/catalog': {
+      id: '/_authenticated/_expert/expert/catalog'
+      path: '/catalog'
+      fullPath: '/expert/catalog'
+      preLoaderRoute: typeof AuthenticatedExpertExpertCatalogRouteImport
+      parentRoute: typeof AuthenticatedExpertExpertRoute
+    }
     '/_authenticated/_expert/expert_/consult/$consultId': {
       id: '/_authenticated/_expert/expert_/consult/$consultId'
       path: '/expert/consult/$consultId'
@@ -459,14 +479,29 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedExpertExpertRouteChildren {
+  AuthenticatedExpertExpertCatalogRoute: typeof AuthenticatedExpertExpertCatalogRoute
+}
+
+const AuthenticatedExpertExpertRouteChildren: AuthenticatedExpertExpertRouteChildren =
+  {
+    AuthenticatedExpertExpertCatalogRoute:
+      AuthenticatedExpertExpertCatalogRoute,
+  }
+
+const AuthenticatedExpertExpertRouteWithChildren =
+  AuthenticatedExpertExpertRoute._addFileChildren(
+    AuthenticatedExpertExpertRouteChildren,
+  )
+
 interface AuthenticatedExpertRouteChildren {
-  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRoute
+  AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRouteWithChildren
   AuthenticatedExpertExpertPrescriptionIdRoute: typeof AuthenticatedExpertExpertPrescriptionIdRoute
   AuthenticatedExpertExpertConsultConsultIdRoute: typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
 
 const AuthenticatedExpertRouteChildren: AuthenticatedExpertRouteChildren = {
-  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRoute,
+  AuthenticatedExpertExpertRoute: AuthenticatedExpertExpertRouteWithChildren,
   AuthenticatedExpertExpertPrescriptionIdRoute:
     AuthenticatedExpertExpertPrescriptionIdRoute,
   AuthenticatedExpertExpertConsultConsultIdRoute:

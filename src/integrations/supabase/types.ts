@@ -23,6 +23,9 @@ export type Database = {
           description: string | null
           external_url: string | null
           id: string
+          import_external_id: string | null
+          import_source: string | null
+          import_status: string
           price: number
           product_name: string
           safety_guardrails: Json
@@ -39,6 +42,9 @@ export type Database = {
           description?: string | null
           external_url?: string | null
           id?: string
+          import_external_id?: string | null
+          import_source?: string | null
+          import_status?: string
           price?: number
           product_name: string
           safety_guardrails?: Json
@@ -55,6 +61,9 @@ export type Database = {
           description?: string | null
           external_url?: string | null
           id?: string
+          import_external_id?: string | null
+          import_source?: string | null
+          import_status?: string
           price?: number
           product_name?: string
           safety_guardrails?: Json

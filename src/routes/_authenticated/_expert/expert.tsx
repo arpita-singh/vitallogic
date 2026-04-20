@@ -151,13 +151,21 @@ function ExpertDashboard() {
   return (
     <Section className="py-12 md:py-16">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline justify-between gap-3">
           <h1 className="font-display text-4xl text-foreground md:text-5xl">
             Expert <span className="text-gradient-gold">queue</span>
           </h1>
-          <span className="text-xs uppercase tracking-wider text-muted-foreground">
-            {items.length} {items.length === 1 ? "item" : "items"}
-          </span>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/expert/catalog"
+              className="rounded-full border border-gold/40 px-3 py-1 text-[11px] uppercase tracking-wider text-gold hover:bg-gold/10"
+            >
+              Catalog review
+            </Link>
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              {items.length} {items.length === 1 ? "item" : "items"}
+            </span>
+          </div>
         </div>
 
         {/* Tabs */}
