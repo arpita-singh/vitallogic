@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.consult-access]
 verify_jwt = false
+
+[functions.marketplace-import]
+verify_jwt = false
