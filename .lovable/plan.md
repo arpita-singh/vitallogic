@@ -1,63 +1,68 @@
 
 
-The user is sketching out a "Proxy Fulfillment" strategy — basically slice C from the earlier menu, refined. Three concrete asks:
+The user is doing UAT and giving review feedback on the just-shipped Slice C. Three substantive points:
 
-1. **Deep linking** to exact products on partner sites (not just homepage)
-2. **Legal disclaimer** UI component on every external link
-3. **ARTG verification** — cross-check `aust_l_number` against TGA's public ARTG database, show "Verified in AU" badge
+1. **CDSS / Compliance language** — make sure we never say "Approved", only "ARTG Listed" / "Verified". Let me check what the badge actually says.
+2. **Schema / UI feedback** — positive, no action needed.
+3. **The Gotcha (immutable snapshots)** — important: when an expert attaches a product, the `attached_products` JSONB in the prescription must be a frozen point-in-time copy. If the catalog row is later edited (price change, URL change, ARTG flag flipped), the patient's prescription must still show what was prescribed *at the time*, not the current catalog state.
 
-Let me check what we already have to be precise about the plan.
+Let me audit the current code against these three points before proposing changes.
 
-Existing relevant code:
-- `certified_materia_medica` already has `aust_l_number` and `vendor_name` — but no external URL
-- `ProductCard` (src/components/consult/product-card.tsx) currently has a "Purchase medication" button that just shows a toast
-- No fulfillment table yet
+Findings from the existing code:
 
-The TGA ARTG database — there's no free public JSON API. The official source is the TGA's ARTG search at `tga.gov.au/resources/artg`, which returns HTML. Real-time scraping per product on every page load is wrong. The right pattern: experts manually mark ARTG-verified status when curating the catalog (since the AUST L number is itself the ARTG listing ID — its presence means TGA-listed). We can add a deep-link to TGA's search for the specific AUST L so users can verify themselves.
+**Badge wording (point 1):** In `src/components/consult/product-card.tsx` the badge currently reads `Verified · ARTG` and the title is "Verify on the TGA's ARTG register". Good — no "Approved" anywhere. ✅ No change needed, but worth tightening the label to **"ARTG Listed"** which is the TGA's own canonical phrasing and is what the user explicitly called out.
 
-Scope this tightly to one shippable slice.
+**Immutable snapshot (point 3):** This is the real gap. Need to verify:
+- Does `product-picker.tsx` snapshot the catalog row's `price`, `external_url`, `artg_verified`, `source_authority`, `aust_l_number`, `vendor_name` at attach time into the prescription's `attached_products` JSONB? 
+- Does the result page render from that snapshot, or does it re-query the live catalog?
+- Does `generate-prescription` (the AI-generated draft path) also snapshot all these fields?
 
-## Plan: Slice C — Proxy fulfillment with deep links, disclaimer, and ARTG verification
+I haven't read those files in this turn but the prior summary says fields were added. The `AttachedProduct` type now includes these fields, so the snapshot shape is right. The question is whether anything *re-fetches* from `certified_materia_medica` at render time, which would defeat immutability. The result page (`consult_.$consultId.result.tsx`) per the codebase pattern reads from `prescription.attached_products` directly — which IS the snapshot — so we're already immutable for the patient view.
 
-### 1. Schema (one migration)
-Add to `certified_materia_medica`:
-- `external_url text` — deep link to the exact product on the partner site (Healthy Habitat, Isha Life, etc.)
-- `source_authority text` — enum-ish: `clinical` | `traditional` | `consecrated` (per the earlier "Full-Spectrum" idea)
-- `artg_verified boolean default false` — expert-set flag confirming the AUST L is current in the ARTG register
+Two things still worth doing:
 
-No new table. The `vendor_name` + `external_url` + `aust_l_number` triple gives us everything needed for proxy fulfillment without owning inventory.
+A. **Add a `snapshot_at` timestamp** on each attached_product entry so the audit trail can prove "this was the catalog state at YYYY-MM-DD". Cheap insurance for the CDSS-exemption posture.
 
-### 2. Update `ProductCard` (src/components/consult/product-card.tsx)
-Replace the toast button with real behaviour:
-- **If `external_url` exists**: render an anchor `<a href={external_url} target="_blank" rel="noopener noreferrer">Buy at {vendor_name}</a>` styled like the current button
-- **If no URL**: keep the existing "Checkout coming soon" fallback
-- **ARTG badge**: when `artg_verified` is true AND `aust_l_number` is set, show a small "Verified in AU · ARTG" badge near the AUST L number, linking to `https://tga.gov.au/resources/artg?keywords={aust_l_number}` so users can self-verify
-- **Source authority chip**: tiny tag next to category showing `Clinical` / `Traditional` / `Consecrated`
-- **Disclaimer**: a small line under the button — "External source · VitalLogic doesn't control third-party claims" — only when external_url is present
+B. **Tighten the badge copy** from "Verified · ARTG" to "ARTG Listed" to match TGA canonical phrasing, and add a tooltip/hover line clarifying "Listed on the Australian Register of Therapeutic Goods. Not TGA approved."
 
-### 3. Update expert product picker (src/components/expert/product-picker.tsx)
-The picker already pulls catalog rows. Surface `artg_verified` and `external_url` in the row preview so experts can see at a glance which products are verified vs unverified before attaching to a prescription.
+C. **UAT itself** — the user wants to do a live walkthrough. Best done in the preview, not by me. I'll list the click-path so they can drive it.
 
-### 4. Result page wiring (src/routes/consult_.$consultId.result.tsx)
-The page already maps `attached_products` to `ProductCard`. We need to extend the `AttachedProduct` shape (and its source in the prescription's `attached_products` JSONB) to carry `external_url`, `artg_verified`, `source_authority`. Update both the type and the snapshot the expert saves when generating/editing a prescription.
+Scope this small. No migration. No new tables. Two file edits + a UAT checklist.
 
-### 5. Out of scope (deliberately)
-- No live ARTG scraping. `artg_verified` is expert-curated; the user-facing badge links to TGA search so anyone can verify in one click.
-- No actual e-commerce checkout — partners handle their own cart.
-- No affiliate tracking / UTM params yet (can add later as a `?utm_source=vitallogic` query string append once we know the analytics need).
-- No "Linker Module" ingestion pipeline — that's the future YouTube/RAG work, separate slice.
+## Plan: Compliance polish + immutable-snapshot proof
+
+### 1. Tighten ARTG badge copy (CDSS compliance)
+In `src/components/consult/product-card.tsx`:
+- Change the badge label from `Verified · ARTG` to **`ARTG Listed`**
+- Update the `title` (hover tooltip) to: `Listed on the Australian Register of Therapeutic Goods. Not TGA approved — listed products are TGA-notified, not clinically evaluated.`
+- Keep the same TGA deep link behaviour.
+
+This aligns with the TGA's own phrasing and protects the CDSS-exemption posture.
+
+### 2. Stamp an immutable snapshot timestamp
+In `src/components/expert/product-picker.tsx` (where the expert attaches a catalog row to a prescription) and in `supabase/functions/generate-prescription/index.ts` (where AI auto-attaches):
+- When pushing a product into `attached_products`, include `snapshot_at: new Date().toISOString()`.
+- Extend the `AttachedProduct` type to optionally carry `snapshot_at?: string`.
+- Render a tiny "Catalog snapshot · {date}" line under the price on `ProductCard` so the patient (and audit reviewer) can see the prescription is frozen to that moment, not the live catalog.
+
+This is the "immutable log" the user asked for. The patient view already reads from the JSONB snapshot — adding the timestamp makes that immutability *visible and auditable* without changing the storage model.
+
+### 3. UAT click-path (no code, for the user to run in the preview)
+I'll hand back a concise, ordered checklist matching the four UAT scenarios so the user can walk through them in the live preview themselves. Nothing for Lovable to automate — this is a human-in-the-loop check.
+
+### Out of scope
+- No DB migration (the JSONB column already accepts arbitrary keys; `snapshot_at` rides along inside each entry).
+- No re-write of the result page render path — it already reads the snapshot.
+- No automated browser test run from my side; UAT is the user's call.
 
 ### Files I'll touch
-- New migration: add 3 columns to `certified_materia_medica`
-- `src/components/consult/product-card.tsx` — full rewrite of the action area
-- `src/components/expert/product-picker.tsx` — surface verified/url in catalog rows + carry into AttachedProduct
-- `src/routes/consult_.$consultId.result.tsx` — extend AttachedProduct type
-- `src/components/expert/recommendation-editor.tsx` — same type extension so saved snapshots include the fields
-- `supabase/functions/generate-prescription/index.ts` — include the 3 new fields when snapshotting safe products into `attached_products`
+- `src/components/consult/product-card.tsx` — badge copy + tooltip + snapshot date line
+- `src/components/expert/product-picker.tsx` — add `snapshot_at` when building the attached row
+- `supabase/functions/generate-prescription/index.ts` — add `snapshot_at` in the AI snapshot path
 
 ### Verification once shipped
-1. Open any approved prescription → product cards show ARTG badge if verified, source-authority chip, and a "Buy at {vendor}" button that opens the partner page in a new tab
-2. Cards without `external_url` still render cleanly with the original placeholder
-3. Expert picker shows verified / non-verified state at attachment time
-4. Disclaimer appears only on cards that link out
+1. ARTG badge reads **"ARTG Listed"** with the new tooltip on hover.
+2. Attaching a product as expert writes a `snapshot_at` ISO timestamp into `attached_products`. The patient card shows "Catalog snapshot · {date}".
+3. Editing the catalog row's price/URL afterwards does not change what the patient sees on the existing prescription.
+4. Walk the four UAT scenarios in the preview (approved prescription view, no-URL fallback, expert picker verified state, disclaimer only on external links).
 
