@@ -55,6 +55,7 @@ function AdminAuditPage() {
   const [checks, setChecks] = useState<Check[]>([]);
   const [roleCounts, setRoleCounts] = useState<RoleCount[]>([]);
   const [recentLog, setRecentLog] = useState<AuditLogRow[]>([]);
+  const [obs, setObs] = useState<ObservabilitySnapshot | null>(null);
 
   const run = async () => {
     setLoading(true);
