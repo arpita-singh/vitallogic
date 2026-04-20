@@ -1,53 +1,41 @@
 
 
-## What's actually happening
+The user is sharing architectural ideas for a major new subsystem — the "Linker Module" — covering RAG schemas, YouTube transcript ingestion ("Cure Hunter"), and fulfillment integrations (Healthy Habitat Market, Isha Life). This is a big new direction, not a continuation of the stale-session bug fix from the previous turn.
 
-The user IS holding a session in localStorage that the client thinks is valid, but the auth server has lost/revoked it. Auth logs since 14:37 UTC show dozens of `403 "session id (d4712b33-...) doesn't exist"` errors against `/user`. The client never notices because:
+Before planning, I need to understand:
+1. The user just received a session-fix in the previous turn but never confirmed it works. That fix is unverified.
+2. The user is asking implicit questions ("Would you like…", "Is this market…", "Would you like me to help…") rather than giving a clear build directive.
+3. This is a massive scope expansion: vector DB, embeddings, Python scraping, YouTube API, fulfillment APIs, new tables, new edge functions.
 
-- `supabase.auth.getSession()` returns the cached session from localStorage without revalidating.
-- `auth.tsx` only sets `user = null` when an `onAuthStateChange` event fires — and a server-side session deletion does not always trigger one if the access token is still within its 1-hour window.
-- The result page sees `user` truthy → calls `readConsult` → edge function calls `admin.auth.getUser(stale_token)` → gets no user → returns 401 → page shows "Sign in to view" gate, but the user IS signed in, causing the loop visible in the video. Same story for `claimSpecificConsult` and `claimPendingConsult`.
+I should NOT silently plan a 3-week ingestion pipeline. I should clarify what they actually want next.
 
-So the symptom — "I'm signed in but can't view my prescription" — is exactly correct.
+## Plan
 
-## The fix
+### Step 1 — confirm the previous fix landed
+Quickly verify the stale-session fix from the prior turn worked end-to-end on `/consult/.../result` before opening a new workstream. Otherwise we pile new architecture on top of an unverified bug.
 
-**1. Detect stale sessions on the client and force a clean sign-out.**
+### Step 2 — narrow the new scope with the user
+The "Linker Module" as written is 4–6 weeks of work. We need to pick a wedge. I'll ask which slice they want first.
 
-In `src/lib/auth.tsx`, after `getSession()` returns a session on initial load, call `supabase.auth.getUser()` once to ask the server to validate the access token. If the server returns no user (session revoked / expired refresh), call `supabase.auth.signOut({ scope: "local" })` to clear localStorage so the UI correctly reflects "signed out", then redirect to login if needed.
+### Step 3 — once a slice is chosen, plan that slice properly
+Each option below maps to a concrete, shippable increment:
 
-**2. Recover gracefully on the result page when the edge function returns 401 despite `user` being non-null.**
+- **A. Schema-only foundation** — add `materia_medica_normalized` table matching the proposed JSON schema (identity, energetics, clinical_logic, safety_guardrails, vector_payload). Enable `pgvector`, add an `embedding vector(1536)` column, RLS for public read + expert write. No ingestion yet. Lets the rest of the app start consuming structured data.
+- **B. Safety guardrails wired into the existing recommender** — add a `safety_guardrails` JSONB column to `certified_materia_medica`, update `generate-prescription` edge function to filter recommendations against the user's intake flags (pregnancy, hyperthyroid, autoimmune, current meds). Smallest change, highest user-safety payoff. No vectors, no scraping.
+- **C. Fulfillment links** — add a `fulfillment_sources` table mapping internal product IDs → external store URLs (Healthy Habitat, Isha Life). Surface "Buy at trusted source" buttons on the prescription result page. Pure CRUD, no scraping.
+- **D. RAG retrieval, ingestion deferred** — build the edge function that takes an intake, embeds it, queries `pgvector` for nearest matches in `materia_medica_normalized`, and returns top-K with safety filtering applied. Seed the table manually with 10–20 herbs to start. No YouTube, no scraping pipeline.
 
-In `src/routes/consult_.$consultId.result.tsx`, when `readConsult` throws `Unauthorized` AND `user` is truthy, treat it as a stale-session signal: call `supabase.auth.signOut({ scope: "local" })`, then re-render. This stops the claim loop and surfaces the proper "Sign in to view your prescription" gate, where the user can actually re-authenticate.
+### Step 4 — explicit rejections (out of scope until later)
+- The Python "Cure Hunter" YouTube pipeline is a separate service that doesn't belong inside this Worker-runtime app. Documented but not built.
+- Scraping `anandyoga.com` or any third-party catalog without a license is a legal/IP concern — flag rather than implement.
+- "Trust score" UI badges depend on having ingestion sources first; deferred.
 
-**3. Stop the toast spam from `claimSpecificConsult`.**
+### Why ask instead of just building
+- Each slice (A/B/C/D) is a real 1–3 day build with its own migration and edge function. Building all four blind would mean 5+ migrations, 3 new edge functions, a new table family, and pgvector setup — all without the user confirming that's the priority over (e.g.) just finishing the prescription flow that was broken yesterday.
+- The user's last verifiable request ("verify claim flow") is still unconfirmed.
 
-The `useRef` guard already prevents the React loop from re-firing, but the original error toast from a 401 should be silenced (it's an expected failure mode now — only log it at warn level, no toast).
-
-**4. Same treatment in `account.tsx` for `claimPendingConsult` 401s.**
-
-Don't surface error toasts when the failure is a stale-session 401; trigger the same local sign-out and reload.
-
-## Why this is correct, not a workaround
-
-A 401 from `admin.auth.getUser(token)` definitively means the client's stored token is no longer valid. The only correct response is to clear the stale session locally so the UI matches reality. The server has already invalidated this session — there is nothing to "fix" server-side. The user can then sign back in cleanly and the existing claim/result flow takes over (verified to work in the previous QA pass).
-
-## Files to change
-
-- `src/lib/auth.tsx` — add a one-time server-side validation on init; sign out locally if stale.
-- `src/routes/consult_.$consultId.result.tsx` — handle 401 from `readConsult` as stale-session.
-- `src/routes/_authenticated/account.tsx` — same handling for `claimPendingConsult` 401.
-- `src/lib/claim-consult.ts` — return a structured result distinguishing "stale session" from "ownership denied" so callers can react correctly.
-
-## Out of scope
-
-- No edge function changes. No database/RLS changes. The `consult-access` function is correct.
-- No change to the anonymous-token flow. That's already verified working.
-
-## Verification
-
-After implementing, in the same browser tab the user is currently in:
-1. The page should auto-detect the dead session, sign them out locally, and show the "Sign in to view your prescription" gate within ~1s of load (no toast spam).
-2. After signing back in, `readConsult` succeeds, the prescription page renders, no claim loop.
-3. Auth logs should stop showing the repeating `session_not_found` 403s for the d4712b33/b0e3085e sessions.
+### What I'll do this turn
+1. Recommend confirming the session fix first.
+2. Ask which slice (A/B/C/D, or something else) to build next.
+3. Hold off on schema/migration writes until they pick.
 
