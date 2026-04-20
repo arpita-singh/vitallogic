@@ -1,67 +1,46 @@
 
 
-Looking at the findings:
+User wants an architectural diagram of the Vital Logic system alongside the IDA work. Given they're on the plan view and just said "also need an architectural diagram", they want this added to the deliverables.
 
-**Finding 1 (error): `user_purchases` missing write policies**
-- Table currently has only SELECT policies. No INSERT/UPDATE/DELETE policies = with RLS enabled, writes from clients are blocked by default. But the scanner flags this as fragile — explicit deny-by-policy is safer than relying on absence.
-- Reality: today no client code writes to this table; it's intended for server-side/admin writes only. We should add explicit policies that lock writes down to admins (and service role bypasses RLS automatically).
+Best format: a Mermaid diagram (renderable, version-controllable, fits the technical audience). Save to `/mnt/documents/` as `.mmd` and emit as artifact.
 
-**Finding 2 (warn): `user_roles` self-insert risk**
-- Reviewing actual policies (from the schema dump): INSERT policy exists with `WITH CHECK has_role(auth.uid(), 'admin')`, plus the `guard_user_roles_write` trigger as defence-in-depth. Self-promotion via API is already blocked.
-- The scanner's concern is largely already addressed. But two hardenings worth doing:
-  1. The trigger allows `auth.uid() is null` (service-role path) — fine, but worth keeping explicit.
-  2. Add `WITH CHECK` to the admins-can-insert policy to also constrain which role values can be granted (already on UPDATE; missing on INSERT).
+## Architectural diagram + IDA dashboard
 
-## Plan
+### Deliverable 1 — System architecture diagram (Mermaid)
+A single `.mmd` file rendered as a downloadable artifact, covering:
 
-### Migration 1 — Lock down `user_purchases` writes
-Add three explicit policies (admin-only writes; service role bypasses RLS so server-side fulfilment still works):
+- **Client layer**: Patient browser, Expert browser, Admin browser
+- **Routing layer**: TanStack Start (public, `_authenticated`, `_expert`, `_expert/admin` route groups)
+- **Server functions**: `consult-server` (claim, contact), `claim-consult`, `consult-access`
+- **Edge functions**: `consult-chat`, `generate-prescription`, `marketplace-import`, `consult-access`
+- **External services**: Lovable AI Gateway (Gemini/GPT), TGA verify URL, vendor storefronts (proxy fulfilment)
+- **Database**: `profiles`, `user_roles`, `consults`, `prescriptions`, `prescription_audit`, `products`, `wisdom_protocols`, `user_purchases`
+- **Security boundary**: RLS policies, `has_role()` SECURITY DEFINER, `guard_user_roles_write` trigger
+- **Auth**: Supabase Auth (email + Google OAuth), session refresh on role grant
 
-```sql
--- INSERT: admins only (service role bypasses RLS)
-create policy "Purchases: admins can insert"
-  on public.user_purchases for insert to authenticated
-  with check (public.has_role(auth.uid(), 'admin'::public.app_role));
+Color-coded by trust zone (public / authenticated / expert / admin / service-role) so you can see at a glance where the privilege boundaries are.
 
--- UPDATE: admins only
-create policy "Purchases: admins can update"
-  on public.user_purchases for update to authenticated
-  using (public.has_role(auth.uid(), 'admin'::public.app_role))
-  with check (public.has_role(auth.uid(), 'admin'::public.app_role));
-
--- DELETE: admins only
-create policy "Purchases: admins can delete"
-  on public.user_purchases for delete to authenticated
-  using (public.has_role(auth.uid(), 'admin'::public.app_role));
-```
-
-### Migration 2 — Harden `user_roles` INSERT
-Tighten the existing admin INSERT policy so it also constrains the role value (parity with the UPDATE policy):
-
-```sql
-drop policy if exists "Roles: admins can insert" on public.user_roles;
-
-create policy "Roles: admins can insert"
-  on public.user_roles for insert to authenticated
-  with check (
-    public.has_role(auth.uid(), 'admin'::public.app_role)
-    and role = any (array['user'::public.app_role, 'expert'::public.app_role, 'admin'::public.app_role])
-  );
-```
-
-The `guard_user_roles_write` trigger remains as defence-in-depth.
-
-### No code changes needed
-- `/expert/admin/roles` already calls `user_roles` insert/delete as an authenticated admin — passes the tightened policy.
-- No client code writes to `user_purchases` today; future fulfilment flows should use the server-side admin client (`supabaseAdmin`) which bypasses RLS, or be gated through admin UI.
-
-### Verification after apply
-1. Re-run security scan → both findings resolved/downgraded
-2. As admin in `/expert/admin/roles` → grant/revoke still works
-3. As non-admin → direct API attempt to insert into `user_purchases` or `user_roles` is rejected
-4. Server-side flows using `supabaseAdmin` are unaffected (service role bypasses RLS)
+### Deliverable 2 — IDA Slice 1 + 2 (from previous plan)
+Unchanged from prior turn:
+- New migration: `role_audit_log` table + trigger on `user_roles` writes
+- New route: `src/routes/_authenticated/_expert/expert_.admin.audit.tsx` with:
+  - RLS coverage matrix (read-only checks)
+  - Claim-language scan results
+  - Role distribution + recent role changes from audit log
+  - Pass/warn/fail dashboard
+- Edit: `src/routes/_authenticated/_expert/expert.tsx` — add "Admin · Audit" nav link
+- Markdown export of the dashboard
 
 ### Files touched
-- 1 new migration file under `supabase/migrations/`
-- No application code changes
+- New: `/mnt/documents/vital-logic-architecture.mmd` (diagram artifact)
+- New migration: `role_audit_log` + trigger
+- New: `src/routes/_authenticated/_expert/expert_.admin.audit.tsx`
+- Edit: `src/routes/_authenticated/_expert/expert.tsx`
+
+### Verification
+1. Architecture diagram renders cleanly in the artifact preview, all trust zones visible and labelled
+2. As admin → `/expert/admin/audit` loads dashboard with checks across all six tracks
+3. Grant a role from `/expert/admin/roles` → entry appears in audit log on the audit page
+4. Markdown export downloads and is human-readable
+5. As expert (non-admin) → audit page shows "Admins only" guard
 
