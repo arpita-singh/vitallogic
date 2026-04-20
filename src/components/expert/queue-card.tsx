@@ -116,7 +116,15 @@ export function QueueCard({ item, isMine }: { item: QueueItem; isMine: boolean }
   );
 
   if (item.isDraft) {
-    return <div className={cardClass}>{inner}</div>;
+    return (
+      <Link
+        to="/expert/consult/$consultId"
+        params={{ consultId: item.consult_id }}
+        className={cn(cardClass, "hover:border-gold/50")}
+      >
+        {inner}
+      </Link>
+    );
   }
 
   return (

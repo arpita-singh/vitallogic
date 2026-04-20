@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "@/components/section";
 import { claimPendingConsult, getPendingConsultId } from "@/lib/claim-consult";
+import { claimConsultsByEmail } from "@/lib/consult-access";
 
 type AccountSearch = { ready?: number };
 
@@ -62,6 +63,17 @@ function AccountPage() {
     let cancelled = false;
     const run = async () => {
       const claimed = await claimPendingConsult(user.id);
+      // Also bulk-attach any anonymous consults that match this account's
+      // verified email — covers users who started a consult anonymously in a
+      // different browser/session before signing in.
+      try {
+        const res = await claimConsultsByEmail();
+        if (!cancelled && res?.claimed && res.claimed > 0) {
+          // Reload below already happens; no extra toast needed.
+        }
+      } catch (e) {
+        console.warn("claimConsultsByEmail (account mount) failed", e);
+      }
       if (cancelled) return;
       await loadConsults();
       // If after claiming there's still a pending pointer (e.g. claim failed

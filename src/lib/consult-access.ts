@@ -73,6 +73,15 @@ export function claimConsultRequest(consultId: string, anonToken?: string) {
   return call<{ ok: boolean; error?: string }>({ action: "claim", consultId, anonToken });
 }
 
+/**
+ * Server-side bulk claim: attach any anonymous consults whose
+ * intake.contactEmail matches the caller's verified auth email. Safe to call
+ * eagerly (returns { claimed: 0 } when there's nothing to attach).
+ */
+export function claimConsultsByEmail() {
+  return call<{ ok: boolean; claimed: number }>({ action: "claimByEmail" });
+}
+
 export function unlockEducationRequest(consultId: string) {
   return call<{ ok: true }>({ action: "unlock", consultId });
 }
