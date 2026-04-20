@@ -1,44 +1,34 @@
 
 
-User wants their actual table data exported as CSV — this is a one-off data export task, not a feature build. They mentioned earlier they want to migrate this product locally, so this is the data-export step from `MIGRATION.md`.
+## What happened
+The 11 public-table CSVs exported correctly. `auth_users.csv` failed because the read-only Postgres role used for ad-hoc queries cannot read Supabase's `auth` schema — that's intentional protection so OAuth tokens, password hashes, and identities can't be exfiltrated by a SQL query.
 
-The 11 tables to export (from the schema above):
-1. `certified_materia_medica`
-2. `consult_messages`
-3. `consults`
-4. `prescription_audit`
-5. `prescriptions`
-6. `profiles`
-7. `role_audit_log`
-8. `user_purchases`
-9. `user_roles`
-10. `wisdom_protocols`
-11. `wisdom_sources`
+## Three ways forward — pick one
 
-Plus `auth.users` (separate — Supabase admin schema, contains emails/OAuth identities needed for migration).
+**Option A — Fix it server-side (recommended)** 
+Run a small one-off script that uses the service-role key (already configured as `SUPABASE_SERVICE_ROLE_KEY`) to call `supabase.auth.admin.listUsers()`. This is the official admin API, returns every user with `id`, `email`, `created_at`, `last_sign_in_at`, `email_confirmed_at`, `raw_user_meta_data`, `raw_app_meta_data`, and OAuth `identities`. Replaces the broken `auth_users.csv` in the existing zip. **Still no password hashes** — those are never returned by the API; they require the dashboard export path.
 
-## Plan
+**Option B — Dashboard export for everything auth-related**
+Lovable Cloud → Users → Export. Gives you a CSV with metadata *and* allows password-hash export for true lift-and-shift. This is the only path that preserves existing passwords on the local instance.
 
-A one-off export job — no code changes, no feature build. I'll:
+**Option C — Skip auth migration entirely**
+Don't move `auth.users`. On the local instance, users re-sign-up (or you seed test accounts). Simplest if you're treating the local fork as a dev environment, not a production cutover.
 
-1. Query each public table via `supabase--read_query` (SELECT *) and write each result to `/mnt/documents/exports/{table}.csv`
-2. Query `auth.users` for the minimum migration-relevant fields (`id`, `email`, `created_at`, `last_sign_in_at`, `raw_user_meta_data`, `raw_app_meta_data`) — **without** password hashes (those are not exposed via read_query and need a separate Supabase dashboard export)
-3. Bundle everything into `/mnt/documents/vital-logic-data-export.zip` for one-click download
-4. Include a short `README.txt` in the zip explaining: row counts per table, column order, the auth.users caveat (password hashes need separate export), and the import command snippet (`\copy public.{table} FROM '{table}.csv' CSV HEADER`)
-5. Emit each CSV + the zip as `<lov-artifact>` tags so they're downloadable
+## My recommendation
+**Both A and B.** A gets you a clean machine-readable user list (emails, OAuth links, metadata) so you can script account re-creation. B gets you the password hashes so existing users don't have to reset.
 
-### What you get
-- 11 individual `.csv` files (one per public table)
-- 1 `auth_users.csv` (metadata only, no password hashes)
-- 1 `README.txt` with row counts + import instructions
-- 1 `vital-logic-data-export.zip` bundling all of the above
+## What I'll do if you approve Option A
+1. Write a one-off Node script that uses `@supabase/supabase-js` with the service-role key to page through `auth.admin.listUsers()` (1000/page)
+2. Flatten each user to a CSV row with: `id, email, phone, created_at, last_sign_in_at, email_confirmed_at, raw_user_meta_data (JSON), raw_app_meta_data (JSON), identities (JSON)`
+3. Overwrite `/mnt/documents/exports/auth_users.csv` with the real data
+4. Rebuild `/mnt/documents/vital-logic-data-export.zip` so the bundle is correct
+5. Update the in-zip `README.txt` to note: "Password hashes not included — export separately via Lovable Cloud → Users → Export if needed"
+6. Re-emit the zip as a downloadable artifact
 
-### Caveats I'll call out
-- **Password hashes**: not included. Export them via Supabase Dashboard → Authentication → Users → Export, or users will need to re-set passwords / re-link OAuth on the local instance.
-- **Storage objects**: none configured in this project — nothing to export.
-- **Edge function secrets**: not data, must be re-created locally per `MIGRATION.md`.
-- **Schema**: already in `supabase/migrations/` — `supabase db reset` re-applies it locally.
+No code changes to the app, no schema changes, no new files in the repo.
 
-### Files touched
-None in the repo. Output goes to `/mnt/documents/exports/` + a zip at `/mnt/documents/vital-logic-data-export.zip`.
+### Verification
+1. `auth_users.csv` opens with real rows (one per user) instead of an error message
+2. New zip contains the corrected `auth_users.csv` and all 11 public CSVs
+3. README explains the password-hash caveat clearly
 
