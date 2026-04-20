@@ -1,51 +1,49 @@
 
 
-User wants admin UI to assign roles to other users. This is the #3 gap I flagged in the previous CMS recommendation. Let me scope concretely.
+User wants to grant admin role to their own account (arpita.singh.syd@gmail.com). This is a bootstrap problem — the admin roles UI requires you to already be admin to use it. Need to check what roles this user currently has.
 
-**What exists:**
-- `user_roles` table with `app_role` enum (`user`, `expert`, `admin`)
-- `has_role()` SECURITY DEFINER function
-- `guard_user_roles_write()` trigger ensures only admins can insert/update/delete roles
-- RLS on `user_roles`: admins can SELECT all, users can SELECT own
-- `profiles` table with `display_name`, `avatar_url` — admin can SELECT only own (not others) per current RLS
+Two paths:
+1. **If they already have admin** → just use `/expert/admin/roles` UI (but then they wouldn't be asking)
+2. **If they don't have admin** → need a one-time SQL migration to seed the admin role for their `auth.users` row
 
-**Gap blocker:** Current `profiles` RLS only lets owner select own. Admins can't list other users to assign roles to them. Need an admin-read RLS policy on `profiles`.
+The `guard_user_roles_write` trigger explicitly allows inserts when `auth.uid() is null` (service role / migration path), so a migration can safely seed the first admin.
 
-**Plan**
+Let me check current state.
+<br>
 
-## Add admin role-management screen
+## Bootstrap admin role for arpita.singh.syd@gmail.com
 
-### 1. Database (migration)
-- Add RLS policy: `Profiles: admins can select all` → `has_role(auth.uid(), 'admin')`
-- No schema changes needed — `user_roles`, trigger, and write policies already exist and are correct
+### Situation
+The `/expert/admin/roles` UI requires you to already be an admin to grant roles to others — classic chicken-and-egg. To bootstrap the first admin we need a one-time database migration that runs as the service role (which the `guard_user_roles_write` trigger explicitly permits when `auth.uid()` is null).
 
-### 2. Route
-- New file: `src/routes/_authenticated/_expert/expert_.admin.roles.tsx` → `/expert/admin/roles`
-- Gate inside the component: only `admin` role passes; `expert`-only users see "Admins only" message (the `_expert` layout already handles expert+admin; we tighten to admin here)
+### Step 1 — Confirm the account exists
+Run a read-only query against `auth.users` to confirm the email is registered and capture its `id`. If it isn't there, you need to sign up at `/signup` first using that exact email, then we proceed.
 
-### 3. UI (single page)
-- Search box: filter by display name or email fragment
-- Table of users: `display_name`, `user_id` (truncated), current roles as badges
-- Per-row actions: toggle `expert` and `admin` chips (insert/delete in `user_roles`)
-- Cannot remove your own `admin` role (guard against locking yourself out)
-- Toast on success/failure; optimistic refresh of the row
+### Step 2 — One-time migration to grant admin
+Insert a row into `public.user_roles` for that user with role `admin`, idempotently (no-op if already present):
 
-### 4. Data wiring
-- List query joins `profiles` + aggregated `user_roles` per user (two queries client-side, merged in memory — small dataset, no need for an RPC yet)
-- Mutations: `supabase.from('user_roles').insert({ user_id, role })` and `.delete().eq(...)` — RLS + trigger enforces admin-only
+```sql
+insert into public.user_roles (user_id, role)
+select id, 'admin'::public.app_role
+from auth.users
+where lower(email) = 'arpita.singh.syd@gmail.com'
+on conflict (user_id, role) do nothing;
+```
 
-### 5. Navigation
-- Add "Admin · Roles" link in expert page header (only visible to admins)
+Note: the `user_roles` table doesn't currently have a unique constraint on `(user_id, role)`. The migration will:
+1. Add `unique (user_id, role)` to `public.user_roles` (safe — prevents duplicate role grants going forward)
+2. Run the idempotent insert above
+
+### Step 3 — Verify
+After the migration:
+1. Sign out and sign back in as `arpita.singh.syd@gmail.com` (so the client refetches roles)
+2. Navigate to `/expert/admin/roles` — you should see the full user list and the "Admin · Roles" link in the expert header
+3. From there you can grant `expert` / `admin` to any other account through the UI — no more SQL needed
 
 ### Files touched
-- New migration (admin SELECT on profiles)
-- New: `src/routes/_authenticated/_expert/expert_.admin.roles.tsx`
-- Edit: `src/routes/_authenticated/_expert/expert.tsx` (add admin-only nav link)
+- One new migration in `supabase/migrations/` (adds unique constraint + seeds admin)
+- No app code changes
 
-### Verification
-1. As admin → `/expert/admin/roles` lists all profiles, can grant/revoke `expert` and `admin`
-2. As expert (non-admin) → page shows "Admins only" guard
-3. Admin cannot remove own admin role (button disabled)
-4. Non-admin attempting direct insert via console → blocked by `guard_user_roles_write` trigger
-5. Newly granted expert can immediately access `/expert` queue
+### If the account isn't registered yet
+Sign up at `/signup` with `arpita.singh.syd@gmail.com` first, confirm the email, then approve this plan and I'll run the migration.
 
