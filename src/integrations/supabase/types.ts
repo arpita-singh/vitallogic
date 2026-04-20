@@ -16,40 +16,49 @@ export type Database = {
     Tables: {
       certified_materia_medica: {
         Row: {
+          artg_verified: boolean
           aust_l_number: string | null
           category: string
           created_at: string
           description: string | null
+          external_url: string | null
           id: string
           price: number
           product_name: string
           safety_guardrails: Json
+          source_authority: string | null
           stock_status: boolean
           updated_at: string
           vendor_name: string | null
         }
         Insert: {
+          artg_verified?: boolean
           aust_l_number?: string | null
           category: string
           created_at?: string
           description?: string | null
+          external_url?: string | null
           id?: string
           price?: number
           product_name: string
           safety_guardrails?: Json
+          source_authority?: string | null
           stock_status?: boolean
           updated_at?: string
           vendor_name?: string | null
         }
         Update: {
+          artg_verified?: boolean
           aust_l_number?: string | null
           category?: string
           created_at?: string
           description?: string | null
+          external_url?: string | null
           id?: string
           price?: number
           product_name?: string
           safety_guardrails?: Json
+          source_authority?: string | null
           stock_status?: boolean
           updated_at?: string
           vendor_name?: string | null
