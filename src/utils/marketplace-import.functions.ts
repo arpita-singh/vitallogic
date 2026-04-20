@@ -13,8 +13,11 @@ const MARKETPLACE_SOURCES = {
   healthy_habitat: {
     label: "Healthy Habitat Market",
     host: "healthyhabitatmarket.com",
-    productsUrl: (limit: number) =>
-      `https://healthyhabitatmarket.com/products.json?limit=${limit}`,
+    // Healthy Habitat is an Elementor/WordPress site without a public product
+    // API (no Shopify /products.json, no WooCommerce Store API, no WP product
+    // CPT). Ingestion requires a manual partner connector — surface a clean
+    // error instead of pretending a feed exists.
+    productsUrl: null,
     productPageUrl: (handle: string) =>
       `https://healthyhabitatmarket.com/products/${handle}`,
     defaultSourceAuthority: "clinical",
@@ -87,10 +90,29 @@ export const importMarketplaceProducts = createServerFn({ method: "POST" })
     }
 
     const cfg = MARKETPLACE_SOURCES[data.source as MarketplaceKey];
+
+    // Sources without a public product feed (e.g. Elementor sites) bail early
+    // with a clear message instead of erroring inside fetch().
+    if (cfg.productsUrl === null) {
+      return {
+        ok: false as const,
+        error: `${cfg.label} does not expose a public product feed. A manual partner connector is required for this source.`,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+      };
+    }
+
     let products: ShopifyProduct[] = [];
     try {
       const res = await fetch(cfg.productsUrl(data.limit), {
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          // Some Shopify storefronts (and edge/CDN layers) reject requests
+          // that lack a real User-Agent — bare Worker fetches fail without it.
+          "User-Agent":
+            "Mozilla/5.0 (compatible; VitalLogicBot/1.0; +https://vitallogic.lovable.app)",
+        },
       });
       if (!res.ok) {
         return {
@@ -101,7 +123,19 @@ export const importMarketplaceProducts = createServerFn({ method: "POST" })
           skipped: 0,
         };
       }
-      const json = (await res.json()) as { products?: ShopifyProduct[] };
+      const text = await res.text();
+      let json: { products?: ShopifyProduct[] };
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return {
+          ok: false as const,
+          error: `Partner returned non-JSON (${text.slice(0, 60)}…). Public feed unavailable.`,
+          inserted: 0,
+          updated: 0,
+          skipped: 0,
+        };
+      }
       products = Array.isArray(json.products) ? json.products : [];
     } catch (err) {
       console.error("marketplace fetch failed", err);
