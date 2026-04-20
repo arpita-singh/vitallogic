@@ -174,8 +174,8 @@ function AccountPage() {
                 <div className="flex-1">
                   <h2 className="font-display text-xl text-gradient-gold">
                     {ready.length === 1
-                      ? "Your prescription is ready"
-                      : `You have ${ready.length} prescriptions ready to view`}
+                      ? "Your recommendation is ready"
+                      : `You have ${ready.length} recommendations ready to view`}
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Your practitioner has approved your recommendations.
@@ -204,7 +204,7 @@ function AccountPage() {
                           params={{ consultId: c.id }}
                           className="inline-flex items-center gap-1 rounded-full bg-gold px-4 py-2 text-xs font-medium uppercase tracking-wider text-background transition-opacity hover:opacity-90"
                         >
-                          View prescription →
+                          View recommendation →
                         </Link>
                       </li>
                     ))}
@@ -277,7 +277,7 @@ function AccountPage() {
                           })}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {isApproved ? "View prescription" : `Consult #${c.id.slice(0, 8)}`}
+                          {isApproved ? "View recommendation" : `Consult #${c.id.slice(0, 8)}`}
                         </p>
                       </div>
                       <span

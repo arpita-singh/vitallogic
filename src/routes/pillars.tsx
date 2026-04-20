@@ -9,12 +9,12 @@ export const Route = createFileRoute("/pillars")({
       {
         name: "description",
         content:
-          "Consult, Prescribe, Medicate, Educate — the four pillars of the Vital Logic health operating system.",
+          "Consult, Recommend, Medicate, Educate — the four pillars of the Vital Logic health operating system.",
       },
       { property: "og:title", content: "The Four Pillars — Vital Logic" },
       {
         property: "og:description",
-        content: "Consult, Prescribe, Medicate, Educate — the architecture of holistic care.",
+        content: "Consult, Recommend, Medicate, Educate — the architecture of holistic care.",
       },
     ],
   }),
@@ -30,7 +30,7 @@ const pillars = [
   },
   {
     icon: Database,
-    title: "Prescribe",
+    title: "Recommend",
     tag: "Pillar 02",
     body: "Recommendations cross-referenced against a curated database of remedies, dosages, contraindications and interactions. Drafted by AI, audited by a qualified human practitioner before it ever reaches you.",
   },

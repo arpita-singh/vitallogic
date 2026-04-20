@@ -25,7 +25,7 @@ const guarantees = [
   {
     icon: ShieldCheck,
     title: "Human-in-the-loop, always",
-    text: "No prescription reaches you without review by a qualified practitioner. AI proposes; humans approve.",
+    text: "No recommendation reaches you without review by a qualified practitioner. AI proposes; humans approve.",
   },
   {
     icon: FileCheck2,

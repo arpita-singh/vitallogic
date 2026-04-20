@@ -28,7 +28,7 @@ export const Route = createFileRoute("/")({
 
 const pillars = [
   { icon: Brain, title: "Consult", text: "AI symptom intake informed by global wisdom traditions." },
-  { icon: Database, title: "Prescribe", text: "Personalised remedies cross-referenced against a curated database." },
+  { icon: Database, title: "Recommend", text: "Personalised remedies cross-referenced against a curated database." },
   { icon: ShieldCheck, title: "Medicate", text: "Marketplace of vetted, regulator-checked products. (Coming soon)" },
   { icon: GraduationCap, title: "Educate", text: "Your personal Owner's Manual — long-term empowerment." },
 ];
@@ -81,7 +81,7 @@ function Home() {
             <p className="mt-5 text-sm text-muted-foreground">
               Already had a consult?{" "}
               <Link to="/login" className="text-gold hover:underline">
-                Sign in to view your prescription
+                Sign in to view your recommendation
               </Link>
             </p>
           )}
