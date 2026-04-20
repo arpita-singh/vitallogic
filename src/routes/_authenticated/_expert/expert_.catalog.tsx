@@ -8,7 +8,7 @@ import { importMarketplaceProducts } from "@/utils/marketplace-import.functions"
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/_authenticated/_expert/expert/catalog")({
+export const Route = createFileRoute("/_authenticated/_expert/expert_/catalog")({
   head: () => ({
     meta: [{ title: "Catalog review — Vital Logic" }],
   }),
