@@ -41,13 +41,21 @@ type EditState = {
 
 const SOURCE_AUTHORITIES = ["clinical", "traditional", "consecrated"] as const;
 
+const MARKETPLACES = [
+  { key: "healthy_habitat" as const, label: "Healthy Habitat Market", host: "healthyhabitatmarket.com" },
+  { key: "isha_life" as const, label: "Isha Life AU", host: "ishalife.com.au" },
+];
+
+type SourceFilter = "all" | "healthyhabitatmarket.com" | "ishalife.com.au";
+
 function CatalogReview() {
   const [rows, setRows] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
+  const [importingKey, setImportingKey] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, EditState>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
   const load = async () => {
     const { data, error } = await supabase
@@ -84,17 +92,17 @@ function CatalogReview() {
     void load();
   }, []);
 
-  const runImport = async () => {
-    setImporting(true);
+  const runImport = async (sourceKey: "healthy_habitat" | "isha_life", label: string) => {
+    setImportingKey(sourceKey);
     try {
       const result = await importMarketplaceProducts({
-        data: { source: "healthy_habitat", limit: 100 },
+        data: { source: sourceKey, limit: 100 },
       });
       if (!result.ok) {
         toast.error(result.error ?? "Import failed.");
       } else {
         toast.success(
-          `${result.source}: ${result.inserted} new · ${result.updated} updated · ${result.skipped} unchanged`,
+          `${result.source ?? label}: ${result.inserted} new · ${result.updated} updated · ${result.skipped} unchanged`,
         );
         setLastSync(new Date().toISOString());
         await load();
@@ -103,9 +111,14 @@ function CatalogReview() {
       console.error(err);
       toast.error("Import failed unexpectedly.");
     } finally {
-      setImporting(false);
+      setImportingKey(null);
     }
   };
+
+  const visibleRows =
+    sourceFilter === "all"
+      ? rows
+      : rows.filter((r) => r.import_source === sourceFilter);
 
   const updateEdit = (id: string, patch: Partial<EditState>) => {
     setEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -176,24 +189,32 @@ function CatalogReview() {
               expose them in patient prescriptions.
             </p>
           </div>
-          <Button
-            onClick={() => void runImport()}
-            disabled={importing}
-            variant="outline"
-            className="shrink-0 border-gold/50 text-gold hover:bg-gold/10"
-          >
-            {importing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Import from Healthy Habitat Market
-          </Button>
+          <div className="flex shrink-0 flex-col gap-2">
+            {MARKETPLACES.map((m) => {
+              const isImporting = importingKey === m.key;
+              return (
+                <Button
+                  key={m.key}
+                  onClick={() => void runImport(m.key, m.label)}
+                  disabled={importingKey !== null}
+                  variant="outline"
+                  className="border-gold/50 text-gold hover:bg-gold/10"
+                >
+                  {isImporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Import from {m.label}
+                </Button>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="mt-4 flex items-center gap-3 text-xs uppercase tracking-wider text-muted-foreground">
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-xs uppercase tracking-wider text-muted-foreground">
           <span>
-            {rows.length} {rows.length === 1 ? "product" : "products"} awaiting review
+            {visibleRows.length} {visibleRows.length === 1 ? "product" : "products"} awaiting review
           </span>
           {lastSync && (
             <>
@@ -201,6 +222,28 @@ function CatalogReview() {
               <span>Last sync {new Date(lastSync).toLocaleTimeString()}</span>
             </>
           )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-muted-foreground/70">Source:</span>
+            {(
+              [
+                { key: "all", label: "All" },
+                ...MARKETPLACES.map((m) => ({ key: m.host, label: m.label })),
+              ] as { key: SourceFilter; label: string }[]
+            ).map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setSourceFilter(opt.key)}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-[10px] transition-colors",
+                  sourceFilter === opt.key
+                    ? "border-gold/60 bg-gold/10 text-gold"
+                    : "border-border text-muted-foreground hover:border-gold/40 hover:text-foreground",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-8 space-y-3">
