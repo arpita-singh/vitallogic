@@ -45,6 +45,23 @@ Each release below is grouped into three tracks:
 
 ---
 
+## [Slice F] — 2026-04-20 · Admin observability & audit
+
+### ✨ Features
+- New `/expert/admin/audit` route — admin-only dashboard surfacing system readiness across six tracks (Auth, RLS, Roles, Consult, Prescription, Marketplace).
+- Role distribution panel + recent role-change feed sourced from `role_audit_log`.
+- **Observability panel** — 7-day KPI tiles, queue health (pending / unclaimed / escalated, oldest-pending age with green/amber/red banding), 14-day inline SVG sparkline (consults vs approved prescriptions), 30-day conversion funnel with drop-off %, active-experts table, unified 20-event activity feed.
+- Markdown export captures the full snapshot (checks + KPIs + funnel) for offline review.
+- Architecture artifact: `vital-logic-architecture.mmd` (Mermaid) covering trust zones, edge functions, data flow, and external services.
+
+### 🔒 Security
+- Admin-only route guard via existing `_expert` layout + `has_role(_user_id, 'admin')` check inside the page.
+- New `role_audit_log` table with RLS (admins read; trigger writes via `SECURITY DEFINER`); `user_roles` writes now logged automatically.
+- Hardened `user_purchases` (admin-only writes) and `user_roles` INSERT policy (validates against `app_role` enum).
+- Bootstrap migration: granted `admin` to `arpita.singh.syd@gmail.com` + unique constraint on `user_roles(user_id, role)`.
+
+---
+
 ## [Slice E] — 2026-04-20 · Marketplace expansion
 
 ### ✨ Features
