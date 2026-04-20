@@ -259,7 +259,8 @@ Deno.serve(async (req) => {
     const { data: catalogRaw, error: catalogErr } = await supabase
       .from("certified_materia_medica")
       .select("id, product_name, category, vendor_name, aust_l_number, safety_guardrails")
-      .eq("stock_status", true);
+      .eq("stock_status", true)
+      .eq("import_status", "live");
     if (catalogErr) console.error("catalog fetch error", catalogErr);
     const catalog = (catalogRaw ?? []) as CatalogRow[];
 

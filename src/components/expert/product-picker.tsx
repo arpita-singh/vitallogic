@@ -63,6 +63,7 @@ export function ProductPicker({
           "id, product_name, category, aust_l_number, price, vendor_name, external_url, artg_verified, source_authority",
         )
         .eq("stock_status", true)
+        .eq("import_status", "live")
         .order("category", { ascending: true })
         .order("product_name", { ascending: true });
       if (cancelled) return;
