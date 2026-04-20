@@ -23,6 +23,7 @@ export type Database = {
           id: string
           price: number
           product_name: string
+          safety_guardrails: Json
           stock_status: boolean
           updated_at: string
           vendor_name: string | null
@@ -35,6 +36,7 @@ export type Database = {
           id?: string
           price?: number
           product_name: string
+          safety_guardrails?: Json
           stock_status?: boolean
           updated_at?: string
           vendor_name?: string | null
@@ -47,6 +49,7 @@ export type Database = {
           id?: string
           price?: number
           product_name?: string
+          safety_guardrails?: Json
           stock_status?: boolean
           updated_at?: string
           vendor_name?: string | null
