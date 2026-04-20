@@ -1,45 +1,70 @@
 
 
-The user is asking how to test the just-shipped Marketplace Ingestion feature (Slice D). No code change needed — this is a guided UAT walkthrough. Keep it concrete, step-by-step, tied to the actual UI they have.
+The user wants to wire Isha Life AU as a second marketplace source alongside Healthy Habitat Market. They explicitly tag it as `source_authority: consecrated/traditional` which is a perfect distinction from the clinical/Healthy Habitat lane.
 
-## How to test Marketplace Ingestion v1
+Slice D already shipped a single-source pipeline hardcoded to `healthyhabitatmarket.com`. The right move is a small refactor: extract a `MARKETPLACE_SOURCES` config map, parameterise the import function, and add a second button in the catalog UI. Schema is already source-agnostic (`import_source` is a free text column). Zero migration needed.
 
-### Prereqs
-- Be signed in as an account with `expert` or `admin` role. If unsure, check `/account` — if you don't see "Expert workspace" links, your account isn't elevated yet and you'll get blocked at step 2.
+Quick sanity check on Isha Life AU — `ishalife.com.au` (or `.com`?) — needs to be a Shopify store for the public `/products.json` endpoint trick to work. I should verify in default mode by curling `https://ishalife.com.au/products.json` before committing. If it's not Shopify or blocks the endpoint, fall back to telling the expert "needs Firecrawl" — same graceful failure path Slice D already has.
 
-### Test 1 — Run the import (happy path)
-1. Navigate to `/expert/catalog` (or click the "Catalog" link in the expert nav).
-2. Click **"Import from Healthy Habitat Market"**.
-3. Wait ~5–15s. You should see a toast / status line like `Inserted N · Updated 0 · Skipped 0`.
-4. The "Pending review" table populates with rows whose `category = uncategorised` and `source_authority = clinical` (placeholders).
+One real decision: do imported Isha Life products default to `source_authority = 'consecrated'` (matching the user's framing) while Healthy Habitat defaults to `clinical`? Yes — that's the whole point of two sources. Bake the default into the source config map, not the function.
 
-**If it fails:** the partner's `products.json` may be blocked or rate-limited. The function returns a clean error message — read the toast.
+Keeping scope tight. No new components, no new routes, no schema changes.
 
-### Test 2 — Curate one product
-1. In the pending table, pick any row (e.g. the first Ashwagandha-style product).
-2. Inline-edit: set a real `category` (e.g. "Adaptogen"), `source_authority` (`clinical` or `consecrated`), paste an `aust_l_number` if the product page lists one, tick `artg_verified`, optionally write a short `description`.
-3. Click **Approve**. Row disappears from "pending" and moves to `live`.
+## Plan: Slice E — Add Isha Life AU as second marketplace source
 
-### Test 3 — Verify live flow (expert side)
-1. Open any consult and start/open a prescription draft.
-2. In the product picker, search for the term you just curated (e.g. "ashwagandha").
-3. The newly approved product should appear with the ARTG Listed badge if you ticked `artg_verified`.
-4. Attach it. Confirm the snapshot timestamp gets stamped (Slice C behaviour still works).
+### 1. Refactor: extract source config (no new files needed)
+In `src/utils/marketplace-import.functions.ts`, replace the hardcoded Healthy Habitat URL with a config map:
 
-### Test 4 — Verify patient sees it
-1. Approve the prescription as expert.
-2. Sign in as the patient (or open the result link).
-3. On `/consult/{id}/result` the product card renders with: ARTG Listed badge, source-authority chip, "Buy at {vendor}" deep link, snapshot date.
+```ts
+const MARKETPLACE_SOURCES = {
+  healthy_habitat: {
+    label: "Healthy Habitat Market",
+    domain: "healthyhabitatmarket.com",
+    productsUrl: "https://healthyhabitatmarket.com/products.json",
+    defaultSourceAuthority: "clinical",
+  },
+  isha_life: {
+    label: "Isha Life AU",
+    domain: "ishalife.com.au",
+    productsUrl: "https://ishalife.com.au/products.json",
+    defaultSourceAuthority: "consecrated",
+  },
+} as const;
+```
 
-### Test 5 — Re-sync (price/stock tracker)
-1. Go back to `/expert/catalog` and click **Import** again.
-2. Toast should now read `Inserted 0 · Updated N · Skipped M` — proves dedupe works and prices/stock refresh without clobbering your curation.
+The existing `importMarketplaceProducts` server function already accepts `source` as input — just looks it up in the map instead of branching. The default `source_authority` written into pending rows now comes from the source config, so Isha Life products land tagged `consecrated` and Healthy Habitat products stay `clinical` — expert can still override during review.
 
-### Test 6 — Safety check (pending rows must NOT leak)
-1. Leave a row as `pending_review` (don't approve it).
-2. In a prescription draft's product picker, search for that product's name.
-3. It should **not** appear. Only `live` rows are queryable for prescriptions.
+### 2. Verify Isha Life is Shopify (in default mode, before coding)
+Run `curl -sI https://ishalife.com.au/products.json` and a small `curl -s ...products.json?limit=1` to confirm:
+- 200 OK
+- Returns `{"products":[...]}` shape
+- No CAPTCHA / Cloudflare block
 
-### What I can do for you
-I can drive this end-to-end in the preview browser if you'd like — just say the word. Otherwise the steps above are the manual UAT script.
+If it fails, surface that to the user immediately and offer the Firecrawl connector path as the v1.1 alternative — don't ship a broken button.
+
+### 3. Catalog UI: second import button
+In `src/routes/_authenticated/_expert/expert.catalog.tsx`, render two buttons side by side instead of one:
+- "Import from Healthy Habitat Market"
+- "Import from Isha Life AU"
+
+Each calls the same server function with the corresponding `source` key. Toast messages show the source label so it's obvious which one ran.
+
+Tiny addition: filter chip above the pending table to filter by `import_source` (`all` / `healthy_habitat` / `isha_life`), since experts will likely curate one source at a time.
+
+### 4. Out of scope
+- Scheduled refresh (still manual button)
+- Non-Shopify scraping fallback for either source (defer to Firecrawl slice)
+- Separate visual treatment for `consecrated` vs `clinical` rows in patient UI — Slice C already renders the source-authority chip, so it just works automatically
+
+### Files I'll touch
+- `src/utils/marketplace-import.functions.ts` — extract `MARKETPLACE_SOURCES` map, parameterise lookup, default authority comes from config
+- `src/routes/_authenticated/_expert/expert.catalog.tsx` — second button + source filter chip
+
+### Verification once shipped
+1. `/expert/catalog` shows two import buttons
+2. Click "Import from Isha Life AU" → toast `Isha Life AU: N inserted · 0 updated · 0 skipped`
+3. Pending rows show `source_authority = consecrated` by default
+4. Filter chip narrows the pending table to one source
+5. Approve a row → flows through existing Slice C product picker → patient sees consecrated badge on the result page
+6. Re-running either import only updates rows from that source (dedupe per `(import_source, import_external_id)` already in place)
 
