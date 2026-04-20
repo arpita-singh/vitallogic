@@ -2,6 +2,8 @@
 
 AI-assisted naturopathic consultations with human expert review.
 
+> 📝 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
+
 VitalLogic guides patients through a structured intake, refines the picture with an AI chat, and routes a draft recommendation to a qualified practitioner who reviews, edits, and approves it before the patient receives anything.
 
 ## What it does
