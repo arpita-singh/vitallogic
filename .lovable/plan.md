@@ -1,68 +1,63 @@
 
 
-## What's actually happening
+The user is sketching out a "Proxy Fulfillment" strategy — basically slice C from the earlier menu, refined. Three concrete asks:
 
-I checked the data. Two real problems, both UX gaps in the current design — nothing is bug-broken.
+1. **Deep linking** to exact products on partner sites (not just homepage)
+2. **Legal disclaimer** UI component on every external link
+3. **ARTG verification** — cross-check `aust_l_number` against TGA's public ARTG database, show "Verified in AU" badge
 
-### Problem 1 — Expert can't click "In progress" drafts
+Let me check what we already have to be precise about the plan.
 
-In `src/components/expert/queue-card.tsx` lines 118–120, draft items are rendered as a plain `<div>` instead of a `<Link>`:
+Existing relevant code:
+- `certified_materia_medica` already has `aust_l_number` and `vendor_name` — but no external URL
+- `ProductCard` (src/components/consult/product-card.tsx) currently has a "Purchase medication" button that just shows a toast
+- No fulfillment table yet
 
-```tsx
-if (item.isDraft) {
-  return <div className={cardClass}>{inner}</div>;
-}
-```
+The TGA ARTG database — there's no free public JSON API. The official source is the TGA's ARTG search at `tga.gov.au/resources/artg`, which returns HTML. Real-time scraping per product on every page load is wrong. The right pattern: experts manually mark ARTG-verified status when curating the catalog (since the AUST L number is itself the ARTG listing ID — its presence means TGA-listed). We can add a deep-link to TGA's search for the specific AUST L so users can verify themselves.
 
-This is intentional — the expert detail page (`/expert/$prescriptionId`) is keyed on a prescription ID, and drafts have no prescription row yet. So there's literally nowhere for the link to go.
+Scope this tightly to one shippable slice.
 
-### Problem 2 — Patient doesn't see their draft consult
+## Plan: Slice C — Proxy fulfillment with deep links, disclaimer, and ARTG verification
 
-Database confirms it. User `arpita.singh.syd@gmail.com` (id `c39d32f2…`) has:
+### 1. Schema (one migration)
+Add to `certified_materia_medica`:
+- `external_url text` — deep link to the exact product on the partner site (Healthy Habitat, Isha Life, etc.)
+- `source_authority text` — enum-ish: `clinical` | `traditional` | `consecrated` (per the earlier "Full-Spectrum" idea)
+- `artg_verified boolean default false` — expert-set flag confirming the AUST L is current in the ARTG register
 
-- 1 approved consult (`c556559a…`) — visible on her account ✅
-- The "Digestion" draft (`ca60a163…`) you see in the expert queue has `user_id = NULL` — it was started **anonymously**, contact email `arpita.singh.syd@gmail.com` was captured, but it was never claimed to her account.
+No new table. The `vendor_name` + `external_url` + `aust_l_number` triple gives us everything needed for proxy fulfillment without owning inventory.
 
-Her account page only queries `consults WHERE user_id = <her id>`, so anonymous drafts aren't visible. The "one consult at a time" perception is correct under the current rules: anonymous consults attach to your account only when (a) you sign up/in with the same browser session that started them (via the `vl_pending_consult_id` localStorage pointer), or (b) you open the consult URL directly.
+### 2. Update `ProductCard` (src/components/consult/product-card.tsx)
+Replace the toast button with real behaviour:
+- **If `external_url` exists**: render an anchor `<a href={external_url} target="_blank" rel="noopener noreferrer">Buy at {vendor_name}</a>` styled like the current button
+- **If no URL**: keep the existing "Checkout coming soon" fallback
+- **ARTG badge**: when `artg_verified` is true AND `aust_l_number` is set, show a small "Verified in AU · ARTG" badge near the AUST L number, linking to `https://tga.gov.au/resources/artg?keywords={aust_l_number}` so users can self-verify
+- **Source authority chip**: tiny tag next to category showing `Clinical` / `Traditional` / `Consecrated`
+- **Disclaimer**: a small line under the button — "External source · VitalLogic doesn't control third-party claims" — only when external_url is present
 
-So she has multiple consults — the system just doesn't link them to her account because they were started in different browser sessions without the localStorage pointer.
+### 3. Update expert product picker (src/components/expert/product-picker.tsx)
+The picker already pulls catalog rows. Surface `artg_verified` and `external_url` in the row preview so experts can see at a glance which products are verified vs unverified before attaching to a prescription.
 
-## The fix — two narrowly-scoped changes
+### 4. Result page wiring (src/routes/consult_.$consultId.result.tsx)
+The page already maps `attached_products` to `ProductCard`. We need to extend the `AttachedProduct` shape (and its source in the prescription's `attached_products` JSONB) to carry `external_url`, `artg_verified`, `source_authority`. Update both the type and the snapshot the expert saves when generating/editing a prescription.
 
-### Fix 1 — Make draft consults openable from the expert queue
+### 5. Out of scope (deliberately)
+- No live ARTG scraping. `artg_verified` is expert-curated; the user-facing badge links to TGA search so anyone can verify in one click.
+- No actual e-commerce checkout — partners handle their own cart.
+- No affiliate tracking / UTM params yet (can add later as a `?utm_source=vitallogic` query string append once we know the analytics need).
+- No "Linker Module" ingestion pipeline — that's the future YouTube/RAG work, separate slice.
 
-Add a new expert route `/expert/consult/$consultId` that shows the in-progress consult (intake + chat history so far + contact details) as **read-only**, with one primary action: "Generate prescription now". Clicking it calls the existing `generate-prescription` edge function, creates the `prescriptions` row, and redirects to the normal `/expert/$prescriptionId` review screen.
+### Files I'll touch
+- New migration: add 3 columns to `certified_materia_medica`
+- `src/components/consult/product-card.tsx` — full rewrite of the action area
+- `src/components/expert/product-picker.tsx` — surface verified/url in catalog rows + carry into AttachedProduct
+- `src/routes/consult_.$consultId.result.tsx` — extend AttachedProduct type
+- `src/components/expert/recommendation-editor.tsx` — same type extension so saved snapshots include the fields
+- `supabase/functions/generate-prescription/index.ts` — include the 3 new fields when snapshotting safe products into `attached_products`
 
-In `queue-card.tsx`, change the draft branch to a `<Link to="/expert/consult/$consultId">` instead of the plain `<div>`.
-
-This unblocks the expert to: see what the patient said, contact them via the captured email, or push them through to a draft prescription manually.
-
-### Fix 2 — Auto-attach anonymous consults by email when a matching user signs in
-
-When a user signs in or signs up, after the existing `claimPendingConsult` (which uses the localStorage pointer), also run a server-side lookup: any `consults` row where `user_id IS NULL` AND `intake->>'contactEmail' = <signed-in user's email>` gets attached to their account.
-
-This is **opt-in by behavior** — the patient already typed their email into the consult form, so attaching by email match is exactly what they expect. We do it server-side in a new `consult-access` action `claimByEmail` (using the auth-validated JWT email; never trusting client-supplied email) so we don't widen RLS.
-
-Account page now shows all of Arpita's consults — both the historical approved one and any drafts she started anonymously.
-
-## Files I'll touch
-
-- `src/components/expert/queue-card.tsx` — make draft cards link to the new route
-- `src/routes/_authenticated/_expert/expert_.consult.$consultId.tsx` — new read-only draft viewer + "Generate prescription" action
-- `supabase/functions/consult-access/index.ts` — add `claimByEmail` action: find unattached consults matching the caller's verified email, set `user_id` to the caller
-- `src/lib/consult-access.ts` — add `claimByEmail()` client wrapper
-- `src/lib/auth.tsx` — call `claimByEmail()` after `claimPendingConsult()` in both `signIn` and `signUp`
-- `src/routes/_authenticated/account.tsx` — also call `claimByEmail()` on mount as a safety net for already-signed-in users (covers Arpita's case right now)
-
-## Out of scope
-
-- No schema changes, no new tables, no RLS rewrites.
-- Not building "merge two accounts" — only attaches anonymous (`user_id IS NULL`) consults; never reassigns one user's consults to another.
-- Not auto-claiming prescriptions in the expert queue (that's a separate workflow decision).
-
-## Verification once shipped
-
-1. **Expert side:** click the "Digestion" draft card → land on the new draft viewer → see Arpita's intake + email + any chat → optionally click "Generate prescription" and land on the standard review page.
-2. **Patient side:** Arpita refreshes `/account` → the Digestion draft now appears under "Your consults" with status "In progress" and links to `/consult/ca60a163…` so she can finish it.
-3. **Safety:** start a new anonymous consult with a random email, sign in as Arpita, confirm that consult does NOT attach (email mismatch).
+### Verification once shipped
+1. Open any approved prescription → product cards show ARTG badge if verified, source-authority chip, and a "Buy at {vendor}" button that opens the partner page in a new tab
+2. Cards without `external_url` still render cleanly with the original placeholder
+3. Expert picker shows verified / non-verified state at attachment time
+4. Disclaimer appears only on cards that link out
 
