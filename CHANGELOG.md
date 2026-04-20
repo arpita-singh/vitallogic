@@ -18,6 +18,10 @@ Each release below is grouped into three tracks:
 ## [Unreleased] — 2026-04-20
 
 ### 🔒 Security
+- **Bootstrap admin migration** — granted `admin` role to `arpita.singh.syd@gmail.com` and added a unique constraint on `user_roles(user_id, role)` to prevent duplicate role grants.
+- **`user_purchases` write lockdown** — explicit admin-only `INSERT` / `UPDATE` / `DELETE` policies; users can read their own row but cannot self-grant unlocked education or fabricate purchases.
+- **`user_roles` INSERT tightening** — policy now validates the inserted role value against the `app_role` enum at the policy level, blocking any client-side privilege-escalation attempt that bypasses the security-definer path.
+- **`role_audit_log` table** + `SECURITY DEFINER` trigger on `user_roles` writes — every grant/revoke is recorded with actor, target, role, and timestamp. Admins-only read policy; rows are immutable from the client.
 - `consult-access` edge function consolidates `start`, `read`, `saveContact`, `claim`, and `unlock` actions behind a single authenticated entry point — smaller surface, single source of truth for consult access rules.
 - Auto safety filter parses intake for **pregnancy, breastfeeding, under-18, hyperthyroid, autoimmune, and current medications**, then excludes contraindicated products *before* the AI sees the catalog. Audit trail persisted under `draft.safety_filtered`.
 - New `safety_guardrails` JSONB column on `certified_materia_medica` with a functional index on `pregnancy_unsafe`.
