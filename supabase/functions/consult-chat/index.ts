@@ -4,6 +4,7 @@
 // (b) a valid bearer JWT for the consult's owner.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "https://esm.sh/zod@3.23.8";
+import { streamChat } from "../_shared/llm.ts";
 
 // Length caps mirror src/lib/consult-schema.ts. Keep these in sync.
 // TODO: longer term, load message history from the DB instead of trusting
@@ -139,20 +140,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
-    const upstream = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        stream: true,
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-      }),
+    const upstream = await streamChat({
+      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
     });
 
     if (!upstream.ok) {

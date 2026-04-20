@@ -2,6 +2,7 @@
 // Public function — works for anonymous and authenticated consults.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "https://esm.sh/zod@3.23.8";
+import { toolCall } from "../_shared/llm.ts";
 
 // Hard caps to bound prompt size before it hits the AI gateway.
 const MAX_INTAKE_FIELD_CHARS = 2000;
@@ -180,10 +181,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Check API key only AFTER authorization, so unauthenticated callers get
-    // a 401 rather than a 500 that could hint at server configuration state.
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    // Provider key checks happen inside `_shared/llm.ts` after authorization,
+    // so unauthenticated callers still get a 401 rather than leaking config state.
 
     // Idempotency: if an approved prescription already exists for this consult,
     // return it instead of stacking another pending draft. This prevents the
@@ -322,48 +321,28 @@ Deno.serve(async (req) => {
       `CONVERSATION:\n${conversation}\n\n` +
       `Draft the prescription now using the submit_prescription tool.`;
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPayload },
-        ],
-        tools: [tool],
-        tool_choice: { type: "function", function: { name: "submit_prescription" } },
-      }),
+    const aiResult = await toolCall({
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPayload },
+      ],
+      tool: tool as Parameters<typeof toolCall>[0]["tool"],
     });
 
-    if (!aiResp.ok) {
-      if (aiResp.status === 429) {
+    if (!aiResult.ok) {
+      if (aiResult.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit reached. Please try again in a moment." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      if (aiResp.status === 402) {
+      if (aiResult.status === 402) {
         return new Response(
           JSON.stringify({ error: "AI credits exhausted. Please add credits to continue." }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      const t = await aiResp.text();
-      console.error("AI gateway error", aiResp.status, t);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const aiJson = await aiResp.json();
-    const toolCall = aiJson.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall?.function?.arguments) {
-      console.error("No tool call returned", JSON.stringify(aiJson));
+      console.error("AI provider error", aiResult.status, aiResult.error);
       return new Response(JSON.stringify({ error: "Could not draft prescription" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -381,7 +360,7 @@ Deno.serve(async (req) => {
       };
     };
     try {
-      draft = JSON.parse(toolCall.function.arguments);
+      draft = aiResult.args as typeof draft;
     } catch (e) {
       console.error("Bad tool arguments", e);
       return new Response(JSON.stringify({ error: "Could not parse draft" }), {
