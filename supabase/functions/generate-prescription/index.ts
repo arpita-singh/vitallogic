@@ -33,11 +33,12 @@ const corsHeaders = {
 
 const SYSTEM_PROMPT = `You are the Vital Logic prescription drafting assistant.
 
-You will receive a consult's intake and full conversation. Produce ONE call to the submit_prescription function with 1–2 thoughtful recommendations.
+You will receive a consult's intake, full conversation, AND a SAFE_CATALOG of products that have already been filtered for this patient's known contraindications. Produce ONE call to the submit_prescription function with 1–2 thoughtful recommendations.
 
 GROUNDING:
 - Draw from the four traditions: Ayurveda, Western Naturopathy, Indigenous medicine, Plant medicine. Pick the modality that best fits the case; "lifestyle" is also valid.
 - Be conservative. Prefer education and gentle interventions.
+- When you suggest a named product, prefer one from SAFE_CATALOG. Anything you suggest outside SAFE_CATALOG must still respect the EXCLUDED_PRODUCTS list — never recommend an excluded product or its close substitutes.
 - Cite credible sources where you can (textbook chapters, peer-reviewed studies, traditional pharmacopoeias).
 
 RED FLAGS — set escalate=true and list the red_flags if you detect any of:
@@ -225,6 +226,72 @@ Deno.serve(async (req) => {
       .eq("consult_id", consultId)
       .order("created_at", { ascending: true });
 
+    // ---- Safety guardrails: filter the certified catalog before prompting ----
+    type Guardrails = {
+      contraindications?: string[];
+      drug_interactions?: string[];
+      pregnancy_unsafe?: boolean;
+      breastfeeding_unsafe?: boolean;
+      hyperthyroid_unsafe?: boolean;
+      autoimmune_unsafe?: boolean;
+      under18_unsafe?: boolean;
+      notes?: string;
+    };
+    type CatalogRow = {
+      id: string;
+      product_name: string;
+      category: string;
+      vendor_name: string | null;
+      aust_l_number: string | null;
+      safety_guardrails: Guardrails | null;
+    };
+
+    const intake = (consult.intake ?? {}) as Record<string, unknown>;
+    const intakeStr = JSON.stringify(intake).toLowerCase();
+    const isPregnant = (intake.pregnancy as string | undefined) === "yes";
+    const isUnder18 = intake.under18 === true;
+    const hasHyperthyroid =
+      /hyperthyroid|thyrotox|graves/i.test(intakeStr);
+    const hasAutoimmune =
+      /autoimmune|lupus|rheumatoid|hashimoto|ms\b|multiple sclerosis|crohn/i.test(intakeStr);
+    const medsLower = String(intake.meds ?? "").toLowerCase();
+
+    const { data: catalogRaw, error: catalogErr } = await supabase
+      .from("certified_materia_medica")
+      .select("id, product_name, category, vendor_name, aust_l_number, safety_guardrails")
+      .eq("stock_status", true);
+    if (catalogErr) console.error("catalog fetch error", catalogErr);
+    const catalog = (catalogRaw ?? []) as CatalogRow[];
+
+    type FilteredItem = CatalogRow & { excluded_reason?: string };
+    const safeCatalog: FilteredItem[] = [];
+    const excludedCatalog: FilteredItem[] = [];
+    for (const item of catalog) {
+      const g = item.safety_guardrails ?? {};
+      const reasons: string[] = [];
+      if (isPregnant && g.pregnancy_unsafe) reasons.push("pregnancy");
+      if (isUnder18 && g.under18_unsafe) reasons.push("under 18");
+      if (hasHyperthyroid && g.hyperthyroid_unsafe) reasons.push("hyperthyroidism");
+      if (hasAutoimmune && g.autoimmune_unsafe) reasons.push("autoimmune condition");
+      // Drug interaction match: any token from drug_interactions appears in
+      // the patient's `meds` free-text field.
+      if (Array.isArray(g.drug_interactions) && medsLower) {
+        for (const interaction of g.drug_interactions) {
+          if (typeof interaction === "string" && interaction.trim()) {
+            if (medsLower.includes(interaction.toLowerCase())) {
+              reasons.push(`interaction with ${interaction}`);
+              break;
+            }
+          }
+        }
+      }
+      if (reasons.length > 0) {
+        excludedCatalog.push({ ...item, excluded_reason: reasons.join(", ") });
+      } else {
+        safeCatalog.push(item);
+      }
+    }
+
     // Truncate intake free-text fields and clip the joined conversation to a
     // hard char cap so a runaway-long history can't blow up the AI prompt.
     const clippedIntake = clip(consult.intake, MAX_INTAKE_FIELD_CHARS);
@@ -236,7 +303,23 @@ Deno.serve(async (req) => {
       conversation = "…[earlier messages truncated]\n\n" + conversation.slice(-MAX_PROMPT_CHARS);
     }
 
-    const userPayload = `INTAKE:\n${JSON.stringify(clippedIntake, null, 2)}\n\nCONVERSATION:\n${conversation}\n\nDraft the prescription now using the submit_prescription tool.`;
+    const safeListForPrompt = safeCatalog.slice(0, 60).map((p) => ({
+      name: p.product_name,
+      category: p.category,
+      vendor: p.vendor_name ?? undefined,
+    }));
+    const excludedListForPrompt = excludedCatalog.slice(0, 30).map((p) => ({
+      name: p.product_name,
+      category: p.category,
+      reason: p.excluded_reason,
+    }));
+
+    const userPayload =
+      `INTAKE:\n${JSON.stringify(clippedIntake, null, 2)}\n\n` +
+      `SAFE_CATALOG (prefer these):\n${JSON.stringify(safeListForPrompt, null, 2)}\n\n` +
+      `EXCLUDED_PRODUCTS (DO NOT recommend or suggest substitutes for safety reasons):\n${JSON.stringify(excludedListForPrompt, null, 2)}\n\n` +
+      `CONVERSATION:\n${conversation}\n\n` +
+      `Draft the prescription now using the submit_prescription tool.`;
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -291,6 +374,10 @@ Deno.serve(async (req) => {
       red_flags: string[];
       escalate: boolean;
       summary: string;
+      safety_filtered?: {
+        applied_flags: string[];
+        excluded_products: { name: string; reason: string }[];
+      };
     };
     try {
       draft = JSON.parse(toolCall.function.arguments);
@@ -301,6 +388,23 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Audit: attach the guardrails decision so reviewers (and the result page)
+    // can see what was filtered and why. This is part of the draft so it
+    // travels with the prescription through review.
+    const appliedFlags: string[] = [];
+    if (isPregnant) appliedFlags.push("pregnancy");
+    if (isUnder18) appliedFlags.push("under 18");
+    if (hasHyperthyroid) appliedFlags.push("hyperthyroidism");
+    if (hasAutoimmune) appliedFlags.push("autoimmune");
+    if (medsLower.trim()) appliedFlags.push("current medications");
+    draft.safety_filtered = {
+      applied_flags: appliedFlags,
+      excluded_products: excludedCatalog.slice(0, 50).map((p) => ({
+        name: p.product_name,
+        reason: p.excluded_reason ?? "",
+      })),
+    };
 
     const status =
       draft.escalate || (Array.isArray(draft.red_flags) && draft.red_flags.length > 0)

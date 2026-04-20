@@ -28,11 +28,16 @@ type Recommendation = {
   safety_notes: string;
   citations: string[];
 };
+type SafetyFiltered = {
+  applied_flags: string[];
+  excluded_products: { name: string; reason: string }[];
+};
 type RxData = {
   summary: string;
   red_flags: string[];
   escalate: boolean;
   recommendations: Recommendation[];
+  safety_filtered?: SafetyFiltered;
 };
 type Rx = {
   id: string;
@@ -418,6 +423,38 @@ function ResultPage() {
             </article>
           ))}
         </div>
+
+        {/* Safety filter audit (subtle, builds trust) */}
+        {data.safety_filtered && data.safety_filtered.applied_flags.length > 0 && (
+          <section className="mt-10 rounded-2xl border border-violet/30 bg-violet/5 p-5">
+            <div className="flex items-center gap-2 text-violet">
+              <ShieldAlert className="h-4 w-4" />
+              <span className="text-xs uppercase tracking-[0.2em]">Safety filter applied</span>
+            </div>
+            <p className="mt-2 text-sm text-foreground/90">
+              Based on your intake, we automatically excluded products contraindicated for{" "}
+              <span className="text-foreground">
+                {data.safety_filtered.applied_flags.join(", ")}
+              </span>
+              .
+            </p>
+            {data.safety_filtered.excluded_products.length > 0 && (
+              <details className="mt-3 text-xs text-muted-foreground">
+                <summary className="cursor-pointer hover:text-foreground">
+                  See what was excluded ({data.safety_filtered.excluded_products.length})
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {data.safety_filtered.excluded_products.map((p, i) => (
+                    <li key={i}>
+                      <span className="text-foreground/80">{p.name}</span>
+                      {p.reason && <> — {p.reason}</>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </section>
+        )}
 
         {/* Section 2: Owner's Manual unlock */}
         <section className="mt-12 overflow-hidden rounded-3xl border border-gold/40 bg-gradient-to-br from-gold/10 via-background to-violet/10 p-8 md:p-10">

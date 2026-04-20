@@ -1,4 +1,4 @@
-import { CheckCircle2, Sparkles, X } from "lucide-react";
+import { CheckCircle2, ShieldCheck, Sparkles, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -131,6 +131,31 @@ export function PrescriptionReviewModal({
               </article>
             ))}
           </div>
+
+          {data.safety_filtered && data.safety_filtered.applied_flags.length > 0 && (
+            <div className="mt-6 rounded-xl border border-violet/40 bg-violet/5 p-4">
+              <div className="flex items-center gap-2 text-violet">
+                <ShieldCheck className="h-4 w-4" />
+                <span className="text-xs uppercase tracking-[0.2em]">Auto safety filter</span>
+              </div>
+              <p className="mt-1 text-sm text-foreground">
+                Catalog filtered for: {data.safety_filtered.applied_flags.join(", ")}.
+              </p>
+              {data.safety_filtered.excluded_products.length > 0 && (
+                <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                  {data.safety_filtered.excluded_products.slice(0, 8).map((p, i) => (
+                    <li key={i}>
+                      <span className="text-foreground/80">{p.name}</span>
+                      {p.reason && <> — {p.reason}</>}
+                    </li>
+                  ))}
+                  {data.safety_filtered.excluded_products.length > 8 && (
+                    <li>+ {data.safety_filtered.excluded_products.length - 8} more</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
 
           {reviewerNotes && (
             <div className="mt-6 rounded-xl border border-border bg-surface p-4">
