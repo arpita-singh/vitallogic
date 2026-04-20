@@ -2,6 +2,7 @@
 // Public function — works for anonymous and authenticated consults.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "https://esm.sh/zod@3.23.8";
+import { toolCall } from "../_shared/llm.ts";
 
 // Hard caps to bound prompt size before it hits the AI gateway.
 const MAX_INTAKE_FIELD_CHARS = 2000;
