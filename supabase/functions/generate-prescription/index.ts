@@ -226,6 +226,72 @@ Deno.serve(async (req) => {
       .eq("consult_id", consultId)
       .order("created_at", { ascending: true });
 
+    // ---- Safety guardrails: filter the certified catalog before prompting ----
+    type Guardrails = {
+      contraindications?: string[];
+      drug_interactions?: string[];
+      pregnancy_unsafe?: boolean;
+      breastfeeding_unsafe?: boolean;
+      hyperthyroid_unsafe?: boolean;
+      autoimmune_unsafe?: boolean;
+      under18_unsafe?: boolean;
+      notes?: string;
+    };
+    type CatalogRow = {
+      id: string;
+      product_name: string;
+      category: string;
+      vendor_name: string | null;
+      aust_l_number: string | null;
+      safety_guardrails: Guardrails | null;
+    };
+
+    const intake = (consult.intake ?? {}) as Record<string, unknown>;
+    const intakeStr = JSON.stringify(intake).toLowerCase();
+    const isPregnant = (intake.pregnancy as string | undefined) === "yes";
+    const isUnder18 = intake.under18 === true;
+    const hasHyperthyroid =
+      /hyperthyroid|thyrotox|graves/i.test(intakeStr);
+    const hasAutoimmune =
+      /autoimmune|lupus|rheumatoid|hashimoto|ms\b|multiple sclerosis|crohn/i.test(intakeStr);
+    const medsLower = String(intake.meds ?? "").toLowerCase();
+
+    const { data: catalogRaw, error: catalogErr } = await supabase
+      .from("certified_materia_medica")
+      .select("id, product_name, category, vendor_name, aust_l_number, safety_guardrails")
+      .eq("stock_status", true);
+    if (catalogErr) console.error("catalog fetch error", catalogErr);
+    const catalog = (catalogRaw ?? []) as CatalogRow[];
+
+    type FilteredItem = CatalogRow & { excluded_reason?: string };
+    const safeCatalog: FilteredItem[] = [];
+    const excludedCatalog: FilteredItem[] = [];
+    for (const item of catalog) {
+      const g = item.safety_guardrails ?? {};
+      const reasons: string[] = [];
+      if (isPregnant && g.pregnancy_unsafe) reasons.push("pregnancy");
+      if (isUnder18 && g.under18_unsafe) reasons.push("under 18");
+      if (hasHyperthyroid && g.hyperthyroid_unsafe) reasons.push("hyperthyroidism");
+      if (hasAutoimmune && g.autoimmune_unsafe) reasons.push("autoimmune condition");
+      // Drug interaction match: any token from drug_interactions appears in
+      // the patient's `meds` free-text field.
+      if (Array.isArray(g.drug_interactions) && medsLower) {
+        for (const interaction of g.drug_interactions) {
+          if (typeof interaction === "string" && interaction.trim()) {
+            if (medsLower.includes(interaction.toLowerCase())) {
+              reasons.push(`interaction with ${interaction}`);
+              break;
+            }
+          }
+        }
+      }
+      if (reasons.length > 0) {
+        excludedCatalog.push({ ...item, excluded_reason: reasons.join(", ") });
+      } else {
+        safeCatalog.push(item);
+      }
+    }
+
     // Truncate intake free-text fields and clip the joined conversation to a
     // hard char cap so a runaway-long history can't blow up the AI prompt.
     const clippedIntake = clip(consult.intake, MAX_INTAKE_FIELD_CHARS);
@@ -237,7 +303,23 @@ Deno.serve(async (req) => {
       conversation = "…[earlier messages truncated]\n\n" + conversation.slice(-MAX_PROMPT_CHARS);
     }
 
-    const userPayload = `INTAKE:\n${JSON.stringify(clippedIntake, null, 2)}\n\nCONVERSATION:\n${conversation}\n\nDraft the prescription now using the submit_prescription tool.`;
+    const safeListForPrompt = safeCatalog.slice(0, 60).map((p) => ({
+      name: p.product_name,
+      category: p.category,
+      vendor: p.vendor_name ?? undefined,
+    }));
+    const excludedListForPrompt = excludedCatalog.slice(0, 30).map((p) => ({
+      name: p.product_name,
+      category: p.category,
+      reason: p.excluded_reason,
+    }));
+
+    const userPayload =
+      `INTAKE:\n${JSON.stringify(clippedIntake, null, 2)}\n\n` +
+      `SAFE_CATALOG (prefer these):\n${JSON.stringify(safeListForPrompt, null, 2)}\n\n` +
+      `EXCLUDED_PRODUCTS (DO NOT recommend or suggest substitutes for safety reasons):\n${JSON.stringify(excludedListForPrompt, null, 2)}\n\n` +
+      `CONVERSATION:\n${conversation}\n\n` +
+      `Draft the prescription now using the submit_prescription tool.`;
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
