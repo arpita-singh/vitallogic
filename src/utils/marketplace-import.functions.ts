@@ -17,13 +17,23 @@ const MARKETPLACE_SOURCES = {
       `https://healthyhabitatmarket.com/products.json?limit=${limit}`,
     productPageUrl: (handle: string) =>
       `https://healthyhabitatmarket.com/products/${handle}`,
+    defaultSourceAuthority: "clinical",
+  },
+  isha_life: {
+    label: "Isha Life AU",
+    host: "ishalife.com.au",
+    productsUrl: (limit: number) =>
+      `https://ishalife.com.au/products.json?limit=${limit}`,
+    productPageUrl: (handle: string) =>
+      `https://ishalife.com.au/products/${handle}`,
+    defaultSourceAuthority: "consecrated",
   },
 } as const;
 
 type MarketplaceKey = keyof typeof MARKETPLACE_SOURCES;
 
 const InputSchema = z.object({
-  source: z.enum(["healthy_habitat"]),
+  source: z.enum(["healthy_habitat", "isha_life"]),
   limit: z.number().int().min(1).max(250).default(100),
 });
 
@@ -181,7 +191,7 @@ export const importMarketplaceProducts = createServerFn({ method: "POST" })
         stock_status: stock,
         external_url: cfg.productPageUrl(p.handle),
         artg_verified: false,
-        source_authority: "clinical",
+        source_authority: cfg.defaultSourceAuthority,
         import_status: "pending_review",
         import_source: cfg.host,
         import_external_id: extId,
