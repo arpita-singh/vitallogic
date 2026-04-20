@@ -168,6 +168,7 @@ export type Database = {
       prescriptions: {
         Row: {
           attached_products: Json
+          attached_protocols: Json
           claimed_at: string | null
           claimed_by: string | null
           consult_id: string
@@ -183,6 +184,7 @@ export type Database = {
         }
         Insert: {
           attached_products?: Json
+          attached_protocols?: Json
           claimed_at?: string | null
           claimed_by?: string | null
           consult_id: string
@@ -198,6 +200,7 @@ export type Database = {
         }
         Update: {
           attached_products?: Json
+          attached_protocols?: Json
           claimed_at?: string | null
           claimed_by?: string | null
           consult_id?: string
@@ -293,6 +296,101 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      wisdom_protocols: {
+        Row: {
+          artg_relevant: boolean
+          contraindications: string[]
+          created_at: string
+          element: string | null
+          evidence_level: string
+          expected_outcome: string | null
+          id: string
+          indications: string[]
+          modality: string
+          name: string
+          name_native: string | null
+          protocol_steps: Json
+          source_id: string
+          updated_at: string
+        }
+        Insert: {
+          artg_relevant?: boolean
+          contraindications?: string[]
+          created_at?: string
+          element?: string | null
+          evidence_level?: string
+          expected_outcome?: string | null
+          id?: string
+          indications?: string[]
+          modality: string
+          name: string
+          name_native?: string | null
+          protocol_steps?: Json
+          source_id: string
+          updated_at?: string
+        }
+        Update: {
+          artg_relevant?: boolean
+          contraindications?: string[]
+          created_at?: string
+          element?: string | null
+          evidence_level?: string
+          expected_outcome?: string | null
+          id?: string
+          indications?: string[]
+          modality?: string
+          name?: string
+          name_native?: string | null
+          protocol_steps?: Json
+          source_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wisdom_protocols_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "wisdom_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wisdom_sources: {
+        Row: {
+          authority_url: string | null
+          bibliography: Json
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          practitioner_count: number | null
+          tradition: string | null
+          updated_at: string
+        }
+        Insert: {
+          authority_url?: string | null
+          bibliography?: Json
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          practitioner_count?: number | null
+          tradition?: string | null
+          updated_at?: string
+        }
+        Update: {
+          authority_url?: string | null
+          bibliography?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          practitioner_count?: number | null
+          tradition?: string | null
+          updated_at?: string
         }
         Relationships: []
       }

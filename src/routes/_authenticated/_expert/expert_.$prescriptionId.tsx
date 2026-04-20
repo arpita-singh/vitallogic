@@ -15,6 +15,7 @@ import { ChatMessage } from "@/components/consult/chat-message";
 import { RecommendationEditor, type RxData } from "@/components/expert/recommendation-editor";
 import { AuditTrail, type AuditEntry } from "@/components/expert/audit-trail";
 import { ProductPicker, type AttachedProduct } from "@/components/expert/product-picker";
+import { WisdomPicker, type AttachedProtocol } from "@/components/expert/wisdom-picker";
 import { PrescriptionReviewModal } from "@/components/expert/prescription-review-modal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -39,6 +40,7 @@ type Prescription = {
   reviewed_at: string | null;
   review_notes: string | null;
   attached_products: AttachedProduct[];
+  attached_protocols: AttachedProtocol[];
 };
 
 type Consult = {
@@ -61,6 +63,7 @@ function ReviewPage() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [edit, setEdit] = useState<RxData | null>(null);
   const [attachedProducts, setAttachedProducts] = useState<AttachedProduct[]>([]);
+  const [attachedProtocols, setAttachedProtocols] = useState<AttachedProtocol[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
@@ -70,7 +73,7 @@ function ReviewPage() {
     const { data: p, error: pErr } = await supabase
       .from("prescriptions")
       .select(
-        "id, consult_id, status, draft, final, claimed_by, claimed_at, reviewed_by, reviewed_at, review_notes, attached_products",
+        "id, consult_id, status, draft, final, claimed_by, claimed_at, reviewed_by, reviewed_at, review_notes, attached_products, attached_protocols",
       )
       .eq("id", prescriptionId)
       .maybeSingle();
@@ -83,6 +86,7 @@ function ReviewPage() {
     setRx(presc);
     setEdit(normalizeRx((presc.final ?? presc.draft) as Partial<RxData> | null));
     setAttachedProducts((presc.attached_products ?? []) as AttachedProduct[]);
+    setAttachedProtocols((presc.attached_protocols ?? []) as AttachedProtocol[]);
     setNotes(presc.review_notes ?? "");
 
     const { data: c } = await supabase
@@ -185,6 +189,7 @@ function ReviewPage() {
         status: "approved",
         final: edit as never,
         attached_products: attachedProducts as never,
+        attached_protocols: attachedProtocols as never,
         reviewed_by: user.id,
         reviewed_at: new Date().toISOString(),
         review_notes: notes || null,
@@ -206,6 +211,16 @@ function ReviewPage() {
     const removed = before.filter((p) => !afterIds.has(p.product_id));
     if (added.length > 0 || removed.length > 0) {
       await writeAudit("attach_products", { added, removed });
+    }
+
+    // Audit protocol attachment.
+    const beforeProto = (rx.attached_protocols ?? []) as AttachedProtocol[];
+    const beforeProtoIds = new Set(beforeProto.map((p) => p.protocol_id));
+    const afterProtoIds = new Set(attachedProtocols.map((p) => p.protocol_id));
+    const addedProto = attachedProtocols.filter((p) => !beforeProtoIds.has(p.protocol_id));
+    const removedProto = beforeProto.filter((p) => !afterProtoIds.has(p.protocol_id));
+    if (addedProto.length > 0 || removedProto.length > 0) {
+      await writeAudit("attach_protocols", { added: addedProto, removed: removedProto });
     }
 
     setReviewOpen(false);
@@ -419,6 +434,23 @@ function ReviewPage() {
                 <ProductPicker
                   value={attachedProducts}
                   onChange={setAttachedProducts}
+                  disabled={!canEdit}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-surface p-5">
+              <h2 className="font-display text-xl text-foreground">
+                Attach practices &amp; protocols
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pulled from the wisdom library — yoga, pranayama, mud therapy, daily routines, and
+                more from cited traditions. Snapshotted into the prescription at attach time.
+              </p>
+              <div className="mt-5">
+                <WisdomPicker
+                  value={attachedProtocols}
+                  onChange={setAttachedProtocols}
                   disabled={!canEdit}
                 />
               </div>

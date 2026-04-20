@@ -6,7 +6,9 @@ import { Section, SectionHeader } from "@/components/section";
 import { ModalityBadge, type Modality } from "@/components/consult/modality-badge";
 import { ContactCapture } from "@/components/consult/contact-capture";
 import { ProductCard } from "@/components/consult/product-card";
+import { ProtocolCard } from "@/components/consult/protocol-card";
 import type { AttachedProduct } from "@/components/expert/product-picker";
+import type { AttachedProtocol } from "@/components/expert/wisdom-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { rememberPendingConsult, claimSpecificConsult, getPendingConsultId, getAnonTokenFor } from "@/lib/claim-consult";
@@ -46,6 +48,7 @@ type Rx = {
   final: RxData | null;
   review_notes: string | null;
   attached_products: AttachedProduct[];
+  attached_protocols: AttachedProtocol[];
 };
 
 function ResultPage() {
@@ -96,7 +99,7 @@ function ResultPage() {
       const [rxRes, unlockRes] = await Promise.all([
         supabase
           .from("prescriptions")
-          .select("id, status, draft, final, review_notes, attached_products, created_at")
+          .select("id, status, draft, final, review_notes, attached_products, attached_protocols, created_at")
           .eq("consult_id", consultId)
           .order("created_at", { ascending: false }),
         user
@@ -343,6 +346,7 @@ function ResultPage() {
   // approved
   const data = rx.final ?? rx.draft;
   const products = (rx.attached_products ?? []) as AttachedProduct[];
+  const protocols = (rx.attached_protocols ?? []) as AttachedProtocol[];
   return (
     <Section>
       <div className="mx-auto max-w-3xl">
@@ -371,6 +375,27 @@ function ResultPage() {
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {products.map((p) => (
                 <ProductCard key={p.product_id} product={p} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Section 1b: Practices & protocols */}
+        {protocols.length > 0 && (
+          <section className="mt-10">
+            <div className="flex items-baseline justify-between">
+              <h2 className="font-display text-2xl text-foreground">Practices &amp; protocols</h2>
+              <span className="text-xs uppercase tracking-wider text-violet">
+                {protocols.length} {protocols.length === 1 ? "practice" : "practices"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Lifestyle and embodied practices drawn from cited wisdom traditions, selected by your
+              practitioner.
+            </p>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {protocols.map((p) => (
+                <ProtocolCard key={p.protocol_id} protocol={p} />
               ))}
             </div>
           </section>
