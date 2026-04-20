@@ -1,68 +1,103 @@
 
 
-The user is doing UAT and giving review feedback on the just-shipped Slice C. Three substantive points:
+The user is sharing rich content about Dr. Om Prakash 'Anand' from anandyoga.com — Panchang Yoga, Pancha Mahabhuta therapy, specialized protocols (color blindness, Parkinson's, Polio), authored bibliography, alternative modalities (mud therapy, magnet therapy, acupressure).
 
-1. **CDSS / Compliance language** — make sure we never say "Approved", only "ARTG Listed" / "Verified". Let me check what the badge actually says.
-2. **Schema / UI feedback** — positive, no action needed.
-3. **The Gotcha (immutable snapshots)** — important: when an expert attaches a product, the `attached_products` JSONB in the prescription must be a frozen point-in-time copy. If the catalog row is later edited (price change, URL change, ARTG flag flipped), the patient's prescription must still show what was prescribed *at the time*, not the current catalog state.
+This is a **knowledge ingestion / RAG seed** request, not a UI feature. They want this expert's wisdom available to the consult AI as grounded reference material — the "Linker Module" they keep referencing.
 
-Let me audit the current code against these three points before proposing changes.
+Let me think about scope. There are three things they're really asking for:
 
-Findings from the existing code:
+1. **Ingest** anandyoga.com content as structured reference material the AI can cite
+2. **Extend the schema** to handle non-herbal modalities (yoga limbs, elements therapy, mud, magnet, acupressure) and lifestyle protocols (daily schedules)
+3. **Authority/citation** — track that recommendations are sourced from Dr. Anand's tradition
 
-**Badge wording (point 1):** In `src/components/consult/product-card.tsx` the badge currently reads `Verified · ARTG` and the title is "Verify on the TGA's ARTG register". Good — no "Approved" anywhere. ✅ No change needed, but worth tightening the label to **"ARTG Listed"** which is the TGA's own canonical phrasing and is what the user explicitly called out.
+I should NOT build the full RAG pipeline today — that's weeks of work (vector store, embeddings, retrieval ranking, citation UI). Instead: a focused first slice that lands the foundation and proves the pattern with this one source. Future sources slot into the same shape.
 
-**Immutable snapshot (point 3):** This is the real gap. Need to verify:
-- Does `product-picker.tsx` snapshot the catalog row's `price`, `external_url`, `artg_verified`, `source_authority`, `aust_l_number`, `vendor_name` at attach time into the prescription's `attached_products` JSONB? 
-- Does the result page render from that snapshot, or does it re-query the live catalog?
-- Does `generate-prescription` (the AI-generated draft path) also snapshot all these fields?
+Two real options on ingestion:
+- **(A) One-time scrape + curated insert** — use Firecrawl or fetch_website during plan execution, then INSERT structured rows into a new `wisdom_sources` + `wisdom_protocols` pair of tables. Manual quality > automated noise for the first source.
+- **(B) Live scrape on demand** — build a server function that hits Firecrawl per consult. Slow, costly, fragile.
 
-I haven't read those files in this turn but the prior summary says fields were added. The `AttachedProduct` type now includes these fields, so the snapshot shape is right. The question is whether anything *re-fetches* from `certified_materia_medica` at render time, which would defeat immutability. The result page (`consult_.$consultId.result.tsx`) per the codebase pattern reads from `prescription.attached_products` directly — which IS the snapshot — so we're already immutable for the patient view.
+(A) is right. Curated > live for high-trust health content.
 
-Two things still worth doing:
+Schema-wise, instead of jamming this into `certified_materia_medica` (which is product-shaped: stock_status, price, AUST L, vendor — none of that fits a yoga protocol), add two purpose-built tables.
 
-A. **Add a `snapshot_at` timestamp** on each attached_product entry so the audit trail can prove "this was the catalog state at YYYY-MM-DD". Cheap insurance for the CDSS-exemption posture.
+I should also clarify one thing before committing: do they want the AI to *automatically* recommend Dr. Anand's protocols inside generated prescriptions, or do they want a separate "Wisdom Library" surface that experts and patients can browse and that experts can manually attach (like the product picker)? Big design fork. I'll ask.
 
-B. **Tighten the badge copy** from "Verified · ARTG" to "ARTG Listed" to match TGA canonical phrasing, and add a tooltip/hover line clarifying "Listed on the Australian Register of Therapeutic Goods. Not TGA approved."
+Actually let me check the consult-chat function quickly to see how grounded context is currently passed to the AI.
 
-C. **UAT itself** — the user wants to do a live walkthrough. Best done in the preview, not by me. I'll list the click-path so they can drive it.
+Looking at the codebase summary — `supabase/functions/consult-chat/index.ts` and `generate-prescription/index.ts` exist. They likely pull from `certified_materia_medica` for product grounding. The same pattern extends to a new `wisdom_protocols` table.
 
-Scope this small. No migration. No new tables. Two file edits + a UAT checklist.
+Let me also consider whether to use Firecrawl. The user mentioned the site is bilingual (Hindi/English), small, and the structure is loose. `code--fetch_website` (already available, no connector needed) is enough for a first pass — handful of pages, manual curation, structured INSERTs. Firecrawl is overkill for one source.
 
-## Plan: Compliance polish + immutable-snapshot proof
+Asking one tight clarifying question, then planning.
 
-### 1. Tighten ARTG badge copy (CDSS compliance)
-In `src/components/consult/product-card.tsx`:
-- Change the badge label from `Verified · ARTG` to **`ARTG Listed`**
-- Update the `title` (hover tooltip) to: `Listed on the Australian Register of Therapeutic Goods. Not TGA approved — listed products are TGA-notified, not clinically evaluated.`
-- Keep the same TGA deep link behaviour.
+## Plan: Wisdom ingestion v1 — Anandyoga as the seed source
 
-This aligns with the TGA's own phrasing and protects the CDSS-exemption posture.
+### Decision needed first
+**Q:** When the AI generates a prescription, should Dr. Anand's protocols (yoga limbs, mud therapy, daily schedules) be **auto-suggested alongside herbal products** in the same draft, OR live in a **separate "Lifestyle & Practice" picker** that the expert chooses to attach? My recommendation is the latter — keeps the herbal/clinical pipeline clean, gives experts deliberate control over modality mixing, matches the existing product-picker UX. I'll proceed with **separate picker** unless you say otherwise.
 
-### 2. Stamp an immutable snapshot timestamp
-In `src/components/expert/product-picker.tsx` (where the expert attaches a catalog row to a prescription) and in `supabase/functions/generate-prescription/index.ts` (where AI auto-attaches):
-- When pushing a product into `attached_products`, include `snapshot_at: new Date().toISOString()`.
-- Extend the `AttachedProduct` type to optionally carry `snapshot_at?: string`.
-- Render a tiny "Catalog snapshot · {date}" line under the price on `ProductCard` so the patient (and audit reviewer) can see the prescription is frozen to that moment, not the live catalog.
+### Schema (one migration, two new tables)
 
-This is the "immutable log" the user asked for. The patient view already reads from the JSONB snapshot — adding the timestamp makes that immutability *visible and auditable* without changing the storage model.
+**`wisdom_sources`** — provenance for everything ingested
+- `id uuid pk`
+- `name text` ("Dr. Om Prakash 'Anand' — Anand Yoga")
+- `tradition text` ("Panchang Yoga / Naturopathy")
+- `authority_url text` ("https://anandyoga.com")
+- `bibliography jsonb` — array of `{title, year}` for the ~50 books
+- `practitioner_count int`, `notes text`
+- `created_at`, `updated_at`
 
-### 3. UAT click-path (no code, for the user to run in the preview)
-I'll hand back a concise, ordered checklist matching the four UAT scenarios so the user can walk through them in the live preview themselves. Nothing for Lovable to automate — this is a human-in-the-loop check.
+**`wisdom_protocols`** — atomic, attachable units of practice
+- `id uuid pk`, `source_id uuid → wisdom_sources`
+- `name text` (e.g. "Mitti Chikitsa — abdominal mud pack")
+- `name_native text` (Devanagari original)
+- `modality text` — enum-ish: `yoga` | `pranayama` | `element_therapy` | `mud_therapy` | `magnet_therapy` | `acupressure` | `shatkarma` | `daily_schedule`
+- `element text nullable` — `space` | `air` | `fire` | `water` | `earth` (for Pancha Mahabhuta mappings)
+- `indications text[]` — symptom/condition tags ("digestion", "anxiety", "cervical spondylitis", "color vision")
+- `contraindications text[]` — safety guardrails (pregnancy, hypertension, etc.)
+- `protocol_steps jsonb` — ordered steps, optional duration/time-of-day
+- `expected_outcome text`, `evidence_level text` (`empirical` | `traditional` | `clinical`)
+- `artg_relevant boolean default false` (most won't be — not a product)
+- `created_at`, `updated_at`
 
-### Out of scope
-- No DB migration (the JSONB column already accepts arbitrary keys; `snapshot_at` rides along inside each entry).
-- No re-write of the result page render path — it already reads the snapshot.
-- No automated browser test run from my side; UAT is the user's call.
+RLS mirrors `certified_materia_medica`: public read, expert/admin write.
 
-### Files I'll touch
-- `src/components/consult/product-card.tsx` — badge copy + tooltip + snapshot date line
-- `src/components/expert/product-picker.tsx` — add `snapshot_at` when building the attached row
-- `supabase/functions/generate-prescription/index.ts` — add `snapshot_at` in the AI snapshot path
+### Ingestion (one-shot, in default mode)
+- Use `code--fetch_website` to pull Anand Yoga's key sub-pages (Panchang Yog, Naturecure, Mitti Chikitsa, Daily Programme, About). No Firecrawl needed for one source.
+- Use `lovable_ai.py` (the AI-gateway skill) with a structured-output schema to extract `wisdom_protocols` rows from the markdown — modality, element, indications, steps. AI does the translation/structuring; I review and INSERT.
+- INSERT one `wisdom_sources` row + ~10–15 curated `wisdom_protocols` rows. Quality over volume.
 
-### Verification once shipped
-1. ARTG badge reads **"ARTG Listed"** with the new tooltip on hover.
-2. Attaching a product as expert writes a `snapshot_at` ISO timestamp into `attached_products`. The patient card shows "Catalog snapshot · {date}".
-3. Editing the catalog row's price/URL afterwards does not change what the patient sees on the existing prescription.
-4. Walk the four UAT scenarios in the preview (approved prescription view, no-URL fallback, expert picker verified state, disclaimer only on external links).
+### Expert UI — minimal v1
+New component `src/components/expert/wisdom-picker.tsx` (mirrors `product-picker.tsx`):
+- Search by indication, modality, element
+- Shows source/tradition chip + evidence-level badge
+- Attaches snapshot into prescription's `attached_protocols` JSONB (new field on `prescriptions` — alongside `attached_products`, with the same `snapshot_at` immutability pattern)
+
+### Patient UI — minimal v1
+On `consult_.$consultId.result.tsx`, render attached protocols below the medications block as `<ProtocolCard />` (new component):
+- Modality + element chips
+- Step-by-step protocol
+- "Tradition: Panchang Yoga · Anand Yoga" attribution line linking to `authority_url`
+- Same `snapshot_at` "Catalog snapshot · {date}" timestamp for audit consistency
+
+### Out of scope (deliberately, for follow-up slices)
+- Vector embeddings / RAG retrieval — protocols are tag-searchable in v1; embeddings come when we have 3+ sources
+- Auto-attach by AI in `generate-prescription` — manual expert curation only in v1 (pending your answer above)
+- Multi-source ingestion pipeline / scheduled scraping
+- "Find a Practitioner" network feature
+- Bibliography → citation graph
+
+### Files I'll touch (in default mode after approval)
+- New migration: `wisdom_sources`, `wisdom_protocols`, RLS, plus `attached_protocols jsonb` column on `prescriptions`
+- Run fetch + AI structuring + INSERT for the seed data
+- `src/components/expert/wisdom-picker.tsx` (new)
+- `src/components/consult/protocol-card.tsx` (new)
+- `src/components/expert/recommendation-editor.tsx` — wire in wisdom picker + attached_protocols
+- `src/routes/consult_.$consultId.result.tsx` — render attached_protocols
+- `src/integrations/supabase/types.ts` regenerates automatically
+
+### Verification
+1. Migration runs; two new tables visible with RLS
+2. Seed ingestion produces 10+ Anand Yoga protocols, source row populated
+3. Expert opens prescription review → "Attach practice/protocol" alongside "Attach product" → searches "digestion" → sees Mitti Chikitsa from Anand Yoga with evidence chip → attaches
+4. Patient on result page sees the medication cards AND a new "Practices & Protocols" section with the snapshot timestamp + Anand Yoga attribution
 
