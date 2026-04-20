@@ -38,6 +38,7 @@ export type AttachedProduct = {
   external_url?: string | null;
   artg_verified?: boolean;
   source_authority?: SourceAuthority | null;
+  snapshot_at?: string;
 };
 
 export function ProductPicker({
@@ -97,6 +98,7 @@ export function ProductPicker({
           external_url: p.external_url,
           artg_verified: p.artg_verified,
           source_authority: p.source_authority,
+          snapshot_at: new Date().toISOString(),
         },
       ]);
     }

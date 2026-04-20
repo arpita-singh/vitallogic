@@ -12,6 +12,7 @@ export type AttachedProduct = {
   external_url?: string | null;
   artg_verified?: boolean;
   source_authority?: "clinical" | "traditional" | "consecrated" | null;
+  snapshot_at?: string;
 };
 
 const AUTHORITY_META: Record<
@@ -52,7 +53,17 @@ export function ProductCard({ product }: { product: AttachedProduct }) {
             </span>
           )}
         </div>
-        <span className="font-display text-2xl text-gold">${price}</span>
+        <div className="flex flex-col items-end">
+          <span className="font-display text-2xl text-gold">${price}</span>
+          {product.snapshot_at && (
+            <span
+              className="mt-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/70"
+              title="Immutable snapshot of the catalog at the time this prescription was issued."
+            >
+              Catalog snapshot · {new Date(product.snapshot_at).toLocaleDateString()}
+            </span>
+          )}
+        </div>
       </div>
 
       <h4 className="mt-3 font-display text-xl leading-tight text-foreground">
@@ -68,11 +79,11 @@ export function ProductCard({ product }: { product: AttachedProduct }) {
                 href={tgaSearch}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Verify on the TGA's ARTG register"
+                title="Listed on the Australian Register of Therapeutic Goods. Not TGA approved — listed products are TGA-notified, not clinically evaluated."
                 className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/20"
               >
                 <ShieldCheck className="h-3 w-3" />
-                Verified · ARTG
+                ARTG Listed
               </a>
             )}
           </div>
