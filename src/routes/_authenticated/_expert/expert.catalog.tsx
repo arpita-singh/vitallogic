@@ -251,16 +251,15 @@ function CatalogReview() {
             <p className="text-center text-sm text-muted-foreground">
               Loading staging area…
             </p>
-          ) : rows.length === 0 ? (
+          ) : visibleRows.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-surface/50 p-12 text-center">
               <p className="font-display text-2xl text-foreground">All clear.</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                No products awaiting review. Click "Import" above to pull the partner
-                catalog.
+                No products awaiting review for this source. Click an "Import" button above to pull a partner catalog.
               </p>
             </div>
           ) : (
-            rows.map((r) => {
+            visibleRows.map((r) => {
               const e = edits[r.id];
               if (!e) return null;
               const saving = savingId === r.id;
