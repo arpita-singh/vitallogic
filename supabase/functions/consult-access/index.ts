@@ -63,6 +63,7 @@ const Body = z.discriminatedUnion("action", [
     contactName: z.string().trim().max(500).optional(),
   }),
   z.object({ action: z.literal("claim"), consultId, anonToken }),
+  z.object({ action: z.literal("claimByEmail") }),
   z.object({ action: z.literal("unlock"), consultId }),
   z.object({ action: z.literal("start"), intake: intakeSchema }),
 ]);
@@ -225,6 +226,53 @@ Deno.serve(async (req) => {
         return json({ error: "Could not unlock right now" }, 500);
       }
       return json({ ok: true });
+    }
+
+    // ---- claimByEmail (requires verified JWT email) ----------------------
+    // Auto-attaches any anonymous (user_id IS NULL) consults whose
+    // intake.contactEmail matches the caller's verified auth email. We trust
+    // ONLY the email coming from the auth server (not the client) so this
+    // can't be used to hijack consults belonging to other emails.
+    if (data.action === "claimByEmail") {
+      if (!verifiedUserId) return json({ error: "Unauthorized" }, 401);
+      if (!isEmailVerified || !verifiedEmail) {
+        return json({ ok: true, claimed: 0 });
+      }
+
+      // Find unattached consults whose intake.contactEmail (case-insensitive)
+      // matches the caller's verified email.
+      const { data: candidates, error: findErr } = await admin
+        .from("consults")
+        .select("id, intake")
+        .is("user_id", null);
+      if (findErr) {
+        console.error("claimByEmail find failed", findErr);
+        return json({ error: "Could not look up consults" }, 500);
+      }
+
+      const matchingIds: string[] = [];
+      for (const row of candidates ?? []) {
+        const intake = (row.intake as Record<string, unknown> | null) ?? null;
+        const ce =
+          typeof intake?.contactEmail === "string"
+            ? (intake.contactEmail as string).trim().toLowerCase()
+            : null;
+        if (ce && ce === verifiedEmail) matchingIds.push(row.id as string);
+      }
+
+      if (matchingIds.length === 0) return json({ ok: true, claimed: 0 });
+
+      const { error: updErr } = await admin
+        .from("consults")
+        .update({ user_id: verifiedUserId })
+        .in("id", matchingIds)
+        .is("user_id", null);
+      if (updErr) {
+        console.error("claimByEmail update failed", updErr);
+        return json({ error: "Could not attach consults" }, 500);
+      }
+
+      return json({ ok: true, claimed: matchingIds.length });
     }
 
     // ---- claim (requires JWT) --------------------------------------------

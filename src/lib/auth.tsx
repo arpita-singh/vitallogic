@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { claimPendingConsult } from "@/lib/claim-consult";
+import { claimConsultsByEmail } from "@/lib/consult-access";
 
 export type AppRole = "user" | "expert" | "admin";
 
@@ -155,6 +156,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let claimedConsultId: string | null = null;
         if (!error && data.user) {
           claimedConsultId = await claimPendingConsult(data.user.id);
+          // Also bulk-attach any anonymous consults whose contact email
+          // matches this account (server validates against the JWT email).
+          claimConsultsByEmail().catch((e) =>
+            console.warn("claimConsultsByEmail (signIn) failed", e),
+          );
         }
         return { error, claimedConsultId };
       },
@@ -171,6 +177,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let claimedConsultId: string | null = null;
         if (!error && data.user) {
           claimedConsultId = await claimPendingConsult(data.user.id);
+          claimConsultsByEmail().catch((e) =>
+            console.warn("claimConsultsByEmail (signUp) failed", e),
+          );
         }
         return { error, claimedConsultId };
       },
