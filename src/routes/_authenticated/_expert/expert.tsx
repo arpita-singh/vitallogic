@@ -164,12 +164,20 @@ function ExpertDashboard() {
               Catalog review
             </Link>
             {isAdmin ? (
-              <Link
-                to="/expert/admin/roles"
-                className="rounded-full border border-gold/40 px-3 py-1 text-[11px] uppercase tracking-wider text-gold hover:bg-gold/10"
-              >
-                Admin · Roles
-              </Link>
+              <>
+                <Link
+                  to="/expert/admin/roles"
+                  className="rounded-full border border-gold/40 px-3 py-1 text-[11px] uppercase tracking-wider text-gold hover:bg-gold/10"
+                >
+                  Admin · Roles
+                </Link>
+                <Link
+                  to="/expert/admin/audit"
+                  className="rounded-full border border-gold/40 px-3 py-1 text-[11px] uppercase tracking-wider text-gold hover:bg-gold/10"
+                >
+                  Admin · Audit
+                </Link>
+              </>
             ) : null}
             <span className="text-xs uppercase tracking-wider text-muted-foreground">
               {items.length} {items.length === 1 ? "item" : "items"}

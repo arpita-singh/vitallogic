@@ -33,6 +33,7 @@ import { Route as AuthenticatedExpertExpertCatalogRouteImport } from './routes/_
 import { Route as AuthenticatedExpertExpertPrescriptionIdRouteImport } from './routes/_authenticated/_expert/expert_.$prescriptionId'
 import { Route as AuthenticatedExpertExpertConsultConsultIdRouteImport } from './routes/_authenticated/_expert/expert_.consult.$consultId'
 import { Route as AuthenticatedExpertExpertAdminRolesRouteImport } from './routes/_authenticated/_expert/expert_.admin.roles'
+import { Route as AuthenticatedExpertExpertAdminAuditRouteImport } from './routes/_authenticated/_expert/expert_.admin.audit'
 
 const UnauthorizedRoute = UnauthorizedRouteImport.update({
   id: '/unauthorized',
@@ -158,6 +159,12 @@ const AuthenticatedExpertExpertAdminRolesRoute =
     path: '/expert/admin/roles',
     getParentRoute: () => AuthenticatedExpertRoute,
   } as any)
+const AuthenticatedExpertExpertAdminAuditRoute =
+  AuthenticatedExpertExpertAdminAuditRouteImport.update({
+    id: '/expert_/admin/audit',
+    path: '/expert/admin/audit',
+    getParentRoute: () => AuthenticatedExpertRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -180,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/consult/$consultId/': typeof ConsultConsultIdIndexRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/expert/catalog': typeof AuthenticatedExpertExpertCatalogRoute
+  '/expert/admin/audit': typeof AuthenticatedExpertExpertAdminAuditRoute
   '/expert/admin/roles': typeof AuthenticatedExpertExpertAdminRolesRoute
   '/expert/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -203,6 +211,7 @@ export interface FileRoutesByTo {
   '/consult/$consultId': typeof ConsultConsultIdIndexRoute
   '/expert/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/expert/catalog': typeof AuthenticatedExpertExpertCatalogRoute
+  '/expert/admin/audit': typeof AuthenticatedExpertExpertAdminAuditRoute
   '/expert/admin/roles': typeof AuthenticatedExpertExpertAdminRolesRoute
   '/expert/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -230,6 +239,7 @@ export interface FileRoutesById {
   '/consult_/$consultId/': typeof ConsultConsultIdIndexRoute
   '/_authenticated/_expert/expert_/$prescriptionId': typeof AuthenticatedExpertExpertPrescriptionIdRoute
   '/_authenticated/_expert/expert_/catalog': typeof AuthenticatedExpertExpertCatalogRoute
+  '/_authenticated/_expert/expert_/admin/audit': typeof AuthenticatedExpertExpertAdminAuditRoute
   '/_authenticated/_expert/expert_/admin/roles': typeof AuthenticatedExpertExpertAdminRolesRoute
   '/_authenticated/_expert/expert_/consult/$consultId': typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId/'
     | '/expert/$prescriptionId'
     | '/expert/catalog'
+    | '/expert/admin/audit'
     | '/expert/admin/roles'
     | '/expert/consult/$consultId'
   fileRoutesByTo: FileRoutesByTo
@@ -279,6 +290,7 @@ export interface FileRouteTypes {
     | '/consult/$consultId'
     | '/expert/$prescriptionId'
     | '/expert/catalog'
+    | '/expert/admin/audit'
     | '/expert/admin/roles'
     | '/expert/consult/$consultId'
   id:
@@ -305,6 +317,7 @@ export interface FileRouteTypes {
     | '/consult_/$consultId/'
     | '/_authenticated/_expert/expert_/$prescriptionId'
     | '/_authenticated/_expert/expert_/catalog'
+    | '/_authenticated/_expert/expert_/admin/audit'
     | '/_authenticated/_expert/expert_/admin/roles'
     | '/_authenticated/_expert/expert_/consult/$consultId'
   fileRoutesById: FileRoutesById
@@ -496,6 +509,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedExpertExpertAdminRolesRouteImport
       parentRoute: typeof AuthenticatedExpertRoute
     }
+    '/_authenticated/_expert/expert_/admin/audit': {
+      id: '/_authenticated/_expert/expert_/admin/audit'
+      path: '/expert/admin/audit'
+      fullPath: '/expert/admin/audit'
+      preLoaderRoute: typeof AuthenticatedExpertExpertAdminAuditRouteImport
+      parentRoute: typeof AuthenticatedExpertRoute
+    }
   }
 }
 
@@ -503,6 +523,7 @@ interface AuthenticatedExpertRouteChildren {
   AuthenticatedExpertExpertRoute: typeof AuthenticatedExpertExpertRoute
   AuthenticatedExpertExpertPrescriptionIdRoute: typeof AuthenticatedExpertExpertPrescriptionIdRoute
   AuthenticatedExpertExpertCatalogRoute: typeof AuthenticatedExpertExpertCatalogRoute
+  AuthenticatedExpertExpertAdminAuditRoute: typeof AuthenticatedExpertExpertAdminAuditRoute
   AuthenticatedExpertExpertAdminRolesRoute: typeof AuthenticatedExpertExpertAdminRolesRoute
   AuthenticatedExpertExpertConsultConsultIdRoute: typeof AuthenticatedExpertExpertConsultConsultIdRoute
 }
@@ -512,6 +533,8 @@ const AuthenticatedExpertRouteChildren: AuthenticatedExpertRouteChildren = {
   AuthenticatedExpertExpertPrescriptionIdRoute:
     AuthenticatedExpertExpertPrescriptionIdRoute,
   AuthenticatedExpertExpertCatalogRoute: AuthenticatedExpertExpertCatalogRoute,
+  AuthenticatedExpertExpertAdminAuditRoute:
+    AuthenticatedExpertExpertAdminAuditRoute,
   AuthenticatedExpertExpertAdminRolesRoute:
     AuthenticatedExpertExpertAdminRolesRoute,
   AuthenticatedExpertExpertConsultConsultIdRoute:
