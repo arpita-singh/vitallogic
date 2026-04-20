@@ -13,8 +13,11 @@ const MARKETPLACE_SOURCES = {
   healthy_habitat: {
     label: "Healthy Habitat Market",
     host: "healthyhabitatmarket.com",
-    productsUrl: (limit: number) =>
-      `https://healthyhabitatmarket.com/products.json?limit=${limit}`,
+    // Healthy Habitat is an Elementor/WordPress site without a public product
+    // API (no Shopify /products.json, no WooCommerce Store API, no WP product
+    // CPT). Ingestion requires a manual partner connector — surface a clean
+    // error instead of pretending a feed exists.
+    productsUrl: null,
     productPageUrl: (handle: string) =>
       `https://healthyhabitatmarket.com/products/${handle}`,
     defaultSourceAuthority: "clinical",
