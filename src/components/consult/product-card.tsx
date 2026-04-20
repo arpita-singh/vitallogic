@@ -1,5 +1,6 @@
 import { ShoppingBag, ShieldCheck, ExternalLink, Sparkles, Leaf, Flame } from "lucide-react";
 import { toast } from "sonner";
+import { buildArtgSearchUrl } from "@/lib/tga";
 
 export type AttachedProduct = {
   product_id: string;
@@ -33,9 +34,8 @@ export function ProductCard({ product }: { product: AttachedProduct }) {
   const hasExternal = Boolean(product.external_url);
   const authority = product.source_authority ? AUTHORITY_META[product.source_authority] : null;
   const showArtg = product.artg_verified && product.aust_l_number;
-  const tgaSearch = product.aust_l_number
-    ? `https://www.tga.gov.au/resources/artg?keywords=${encodeURIComponent(product.aust_l_number)}`
-    : null;
+  const tgaSearch = buildArtgSearchUrl(product.aust_l_number);
+  const vendorLabel = product.vendor_name?.trim() || "partner store";
 
   return (
     <article className="flex h-full flex-col rounded-2xl border border-border bg-surface p-5 transition-colors hover:border-gold/40">
@@ -108,7 +108,7 @@ export function ProductCard({ product }: { product: AttachedProduct }) {
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
               <ExternalLink className="h-4 w-4" />
-              Buy at {product.vendor_name ?? "trusted source"}
+              Buy at {vendorLabel}
             </a>
             <p className="mt-2 text-center text-[10px] leading-snug text-muted-foreground">
               External source · VitalLogic doesn't control third-party claims.
