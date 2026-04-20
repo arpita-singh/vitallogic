@@ -18,11 +18,18 @@ Each release below is grouped into three tracks:
 ## [Unreleased] — 2026-04-20
 
 ### 🔒 Security
+- **Bootstrap admin migration** — granted `admin` role to `arpita.singh.syd@gmail.com` and added a unique constraint on `user_roles(user_id, role)` to prevent duplicate role grants.
+- **`user_purchases` write lockdown** — explicit admin-only `INSERT` / `UPDATE` / `DELETE` policies; users can read their own row but cannot self-grant unlocked education or fabricate purchases.
+- **`user_roles` INSERT tightening** — policy now validates the inserted role value against the `app_role` enum at the policy level, blocking any client-side privilege-escalation attempt that bypasses the security-definer path.
+- **`role_audit_log` table** + `SECURITY DEFINER` trigger on `user_roles` writes — every grant/revoke is recorded with actor, target, role, and timestamp. Admins-only read policy; rows are immutable from the client.
 - `consult-access` edge function consolidates `start`, `read`, `saveContact`, `claim`, and `unlock` actions behind a single authenticated entry point — smaller surface, single source of truth for consult access rules.
 - Auto safety filter parses intake for **pregnancy, breastfeeding, under-18, hyperthyroid, autoimmune, and current medications**, then excludes contraindicated products *before* the AI sees the catalog. Audit trail persisted under `draft.safety_filtered`.
 - New `safety_guardrails` JSONB column on `certified_materia_medica` with a functional index on `pregnancy_unsafe`.
 
 ### ✨ Features
+- **Admin audit dashboard** at `/expert/admin/audit` — six-track readiness checks (Auth, RLS, Roles, Consult, Prescription, Marketplace), role distribution panel, recent role-change feed, and Markdown export for offline review.
+- **Observability module** embedded in the audit dashboard — 7-day KPI tiles (consults, prescriptions, approvals, median review time), queue health with colour-coded oldest-pending age, hand-rolled 14-day SVG sparkline (consults vs approvals), 30-day conversion funnel with drop-off %, active-experts panel, and a unified recent activity feed across consults, prescriptions, and role changes.
+- **Architecture diagram** — `vital-logic-architecture.mmd` Mermaid artifact mapping trust zones, data flow, edge functions, and external dependencies.
 - **Slice E — Marketplace expansion (Isha Life AU):** second Shopify source wired through a `MARKETPLACE_SOURCES` config map. Isha Life products land tagged `source_authority: consecrated` while Healthy Habitat stays `clinical`. Catalog UI gets a per-source filter chip.
 - **Slice D — Fulfillment Linker v1 (Healthy Habitat Market):** Shopify `/products.json` ingestion, expert catalog review UI, price/stock re-sync, dedupe per `(import_source, import_external_id)`.
 - **Anonymous consult support** — `anonToken` in `localStorage` lets visitors complete a consult without an account; the contact step captures email for practitioner follow-up.
@@ -35,6 +42,23 @@ Each release below is grouped into three tracks:
 
 ### 🔄 Changed
 - Replaced `consult-server.ts` + `consult-schema.ts` with `consult-access.ts` + `consult-types.ts`.
+
+---
+
+## [Slice F] — 2026-04-20 · Admin observability & audit
+
+### ✨ Features
+- New `/expert/admin/audit` route — admin-only dashboard surfacing system readiness across six tracks (Auth, RLS, Roles, Consult, Prescription, Marketplace).
+- Role distribution panel + recent role-change feed sourced from `role_audit_log`.
+- **Observability panel** — 7-day KPI tiles, queue health (pending / unclaimed / escalated, oldest-pending age with green/amber/red banding), 14-day inline SVG sparkline (consults vs approved prescriptions), 30-day conversion funnel with drop-off %, active-experts table, unified 20-event activity feed.
+- Markdown export captures the full snapshot (checks + KPIs + funnel) for offline review.
+- Architecture artifact: `vital-logic-architecture.mmd` (Mermaid) covering trust zones, edge functions, data flow, and external services.
+
+### 🔒 Security
+- Admin-only route guard via existing `_expert` layout + `has_role(_user_id, 'admin')` check inside the page.
+- New `role_audit_log` table with RLS (admins read; trigger writes via `SECURITY DEFINER`); `user_roles` writes now logged automatically.
+- Hardened `user_purchases` (admin-only writes) and `user_roles` INSERT policy (validates against `app_role` enum).
+- Bootstrap migration: granted `admin` to `arpita.singh.syd@gmail.com` + unique constraint on `user_roles(user_id, role)`.
 
 ---
 
