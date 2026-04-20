@@ -90,7 +90,7 @@ export function ProtocolCard({ protocol }: { protocol: AttachedProtocol }) {
         </div>
       )}
 
-      <div className="mt-auto pt-5 border-t border-border/60 mt-5 pt-4">
+      <div className="mt-auto border-t border-border/60 pt-4">
         <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <BookOpen className="h-3 w-3 text-gold" />
