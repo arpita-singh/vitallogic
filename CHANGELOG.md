@@ -27,6 +27,9 @@ Each release below is grouped into three tracks:
 - New `safety_guardrails` JSONB column on `certified_materia_medica` with a functional index on `pregnancy_unsafe`.
 
 ### ✨ Features
+- **Admin audit dashboard** at `/expert/admin/audit` — six-track readiness checks (Auth, RLS, Roles, Consult, Prescription, Marketplace), role distribution panel, recent role-change feed, and Markdown export for offline review.
+- **Observability module** embedded in the audit dashboard — 7-day KPI tiles (consults, prescriptions, approvals, median review time), queue health with colour-coded oldest-pending age, hand-rolled 14-day SVG sparkline (consults vs approvals), 30-day conversion funnel with drop-off %, active-experts panel, and a unified recent activity feed across consults, prescriptions, and role changes.
+- **Architecture diagram** — `vital-logic-architecture.mmd` Mermaid artifact mapping trust zones, data flow, edge functions, and external dependencies.
 - **Slice E — Marketplace expansion (Isha Life AU):** second Shopify source wired through a `MARKETPLACE_SOURCES` config map. Isha Life products land tagged `source_authority: consecrated` while Healthy Habitat stays `clinical`. Catalog UI gets a per-source filter chip.
 - **Slice D — Fulfillment Linker v1 (Healthy Habitat Market):** Shopify `/products.json` ingestion, expert catalog review UI, price/stock re-sync, dedupe per `(import_source, import_external_id)`.
 - **Anonymous consult support** — `anonToken` in `localStorage` lets visitors complete a consult without an account; the contact step captures email for practitioner follow-up.
