@@ -225,7 +225,7 @@ function ResultPage() {
             <LogIn className="h-7 w-7 text-gold" />
           </div>
           <h1 className="mt-5 font-display text-3xl text-foreground md:text-4xl">
-            Sign in to view your prescription
+            Sign in to view your recommendation
           </h1>
           <p className="mx-auto mt-4 max-w-md text-muted-foreground">
             Your practitioner is reviewing your consult. Sign in or create an account
@@ -364,7 +364,7 @@ function ResultPage() {
         {products.length > 0 && (
           <section className="mt-10">
             <div className="flex items-baseline justify-between">
-              <h2 className="font-display text-2xl text-foreground">Your prescribed support</h2>
+              <h2 className="font-display text-2xl text-foreground">Your recommended support</h2>
               <span className="text-xs uppercase tracking-wider text-gold">
                 {products.length} {products.length === 1 ? "item" : "items"}
               </span>
