@@ -431,6 +431,14 @@ function AdminAuditPage() {
           </div>
         </div>
 
+        {/* Observability */}
+        <div className="mt-6">
+          <h2 className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Observability
+          </h2>
+          <ObservabilityPanel onSnapshot={setObs} />
+        </div>
+
         {/* Checks by track */}
         <div className="mt-6 space-y-4">
           {loading && checks.length === 0 ? (
