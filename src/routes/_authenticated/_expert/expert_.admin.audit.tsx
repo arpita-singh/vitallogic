@@ -7,6 +7,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertTriangle, XCircle, Download } from "lucide-react";
+import {
+  ObservabilityPanel,
+  type ObservabilitySnapshot,
+} from "@/components/expert/observability-panel";
 
 export const Route = createFileRoute("/_authenticated/_expert/expert_/admin/audit")({
   head: () => ({
@@ -51,6 +55,7 @@ function AdminAuditPage() {
   const [checks, setChecks] = useState<Check[]>([]);
   const [roleCounts, setRoleCounts] = useState<RoleCount[]>([]);
   const [recentLog, setRecentLog] = useState<AuditLogRow[]>([]);
+  const [obs, setObs] = useState<ObservabilitySnapshot | null>(null);
 
   const run = async () => {
     setLoading(true);
@@ -305,6 +310,31 @@ function AdminAuditPage() {
     lines.push("## Role distribution");
     for (const r of roleCounts) lines.push(`- **${r.role}**: ${r.count}`);
     lines.push("");
+    if (obs) {
+      lines.push("## Observability (last 7 days)");
+      lines.push(`- Consults started: **${obs.consults7d}**`);
+      lines.push(`- Prescriptions generated: **${obs.prescriptions7d}**`);
+      lines.push(`- Prescriptions approved: **${obs.approved7d}**`);
+      lines.push(
+        `- Median review time: **${obs.medianReviewHours === null ? "—" : `${obs.medianReviewHours}h`}**`,
+      );
+      lines.push("");
+      lines.push("### Queue health");
+      lines.push(`- Pending: ${obs.pendingCount} (unclaimed: ${obs.unclaimedPending})`);
+      lines.push(`- Escalated: ${obs.escalatedCount}`);
+      lines.push(
+        `- Oldest pending age: ${obs.oldestPendingHours === null ? "—" : `${obs.oldestPendingHours}h`}`,
+      );
+      lines.push("");
+      lines.push("### Funnel (last 30d)");
+      for (const f of obs.funnel) lines.push(`- ${f.label}: **${f.count}**`);
+      lines.push("");
+      lines.push("### Active experts (last 7d)");
+      if (obs.activeExperts.length === 0) lines.push("_None._");
+      for (const e of obs.activeExperts)
+        lines.push(`- \`${e.expertId.slice(0, 8)}\` — ${e.reviews} review(s)`);
+      lines.push("");
+    }
     lines.push("## Checks");
     const byTrack = new Map<string, Check[]>();
     for (const c of checks) {
@@ -424,6 +454,14 @@ function AdminAuditPage() {
               </Badge>
             ))}
           </div>
+        </div>
+
+        {/* Observability */}
+        <div className="mt-6">
+          <h2 className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Observability
+          </h2>
+          <ObservabilityPanel onSnapshot={setObs} />
         </div>
 
         {/* Checks by track */}
