@@ -7,6 +7,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertTriangle, XCircle, Download } from "lucide-react";
+import {
+  ObservabilityPanel,
+  type ObservabilitySnapshot,
+} from "@/components/expert/observability-panel";
 
 export const Route = createFileRoute("/_authenticated/_expert/expert_/admin/audit")({
   head: () => ({
