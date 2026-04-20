@@ -214,9 +214,9 @@ function ExpertDraftConsult() {
             {(intake.allergies as string | undefined) && (
               <Field label="Allergies" value={intake.allergies as string} wide />
             )}
-            {intake.pregnancy && intake.pregnancy !== "na" && (
+            {intake.pregnancy && intake.pregnancy !== "na" ? (
               <Field label="Pregnant" value={String(intake.pregnancy)} />
-            )}
+            ) : null}
             {intake.under18 === true && <Field label="Under 18" value="yes" />}
             {(intake.symptomsNote as string | undefined) && (
               <Field label="Notes" value={intake.symptomsNote as string} wide />
