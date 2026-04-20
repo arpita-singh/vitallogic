@@ -10,11 +10,16 @@ export type Recommendation = {
   safety_notes: string;
   citations: string[];
 };
+export type SafetyFiltered = {
+  applied_flags: string[];
+  excluded_products: { name: string; reason: string }[];
+};
 export type RxData = {
   summary: string;
   red_flags: string[];
   escalate: boolean;
   recommendations: Recommendation[];
+  safety_filtered?: SafetyFiltered;
 };
 
 const MODALITIES: Modality[] = [
