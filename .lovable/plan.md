@@ -1,50 +1,51 @@
 
 
-User has provided a UAT report for Slice C (Proxy Fulfillment) with 3 specific bugs to verify and fix. Let me explore the relevant code first to scope what's actually there vs what needs fixing.
+User wants admin UI to assign roles to other users. This is the #3 gap I flagged in the previous CMS recommendation. Let me scope concretely.
 
-Files to inspect:
-- `src/components/consult/product-card.tsx` — likely renders the "Buy at {vendor}" button + disclaimer
-- `src/routes/consult_.$consultId.result.tsx` — the page user is currently on, where the prescription renders
-- `src/components/expert/product-picker.tsx` — Expert AUST L handling
-- `supabase/functions/generate-prescription/index.ts` — snapshot logic (price, vendor, url)
+**What exists:**
+- `user_roles` table with `app_role` enum (`user`, `expert`, `admin`)
+- `has_role()` SECURITY DEFINER function
+- `guard_user_roles_write()` trigger ensures only admins can insert/update/delete roles
+- RLS on `user_roles`: admins can SELECT all, users can SELECT own
+- `profiles` table with `display_name`, `avatar_url` — admin can SELECT only own (not others) per current RLS
 
-Let me check these to confirm bug presence before proposing the plan.
-<br>
+**Gap blocker:** Current `profiles` RLS only lets owner select own. Admins can't list other users to assign roles to them. Need an admin-read RLS policy on `profiles`.
 
-## Plan: Slice C UAT fixes — 3 verified bugs + snapshot integrity
+**Plan**
 
-### Bugs to fix
+## Add admin role-management screen
 
-**Bug 1 — External link security (`rel="noopener noreferrer"`)**
-- Audit every `<a target="_blank">` rendering an `external_url` (product card on patient result page, expert product picker preview, catalog row "view on partner")
-- Ensure all carry `rel="noopener noreferrer"` (catalog page already does; verify product card + any expert-side renderers)
+### 1. Database (migration)
+- Add RLS policy: `Profiles: admins can select all` → `has_role(auth.uid(), 'admin')`
+- No schema changes needed — `user_roles`, trigger, and write policies already exist and are correct
 
-**Bug 2 — AUST L number resilience for TGA search link**
-- Wherever a TGA search URL is built from `aust_l_number`, normalise the value: strip the `AUST L ` prefix and all whitespace, keep digits only, then `encodeURIComponent` it
-- Centralise in a small helper (e.g. `src/lib/tga.ts` → `buildArtgSearchUrl(austL: string)`) so product card, expert picker, and catalog all use the same logic
-- Handles both `"AUST L 12345"` and `"12345"` inputs identically
+### 2. Route
+- New file: `src/routes/_authenticated/_expert/expert_.admin.roles.tsx` → `/expert/admin/roles`
+- Gate inside the component: only `admin` role passes; `expert`-only users see "Admins only" message (the `_expert` layout already handles expert+admin; we tighten to admin here)
 
-**Bug 3 — Vendor name fallback on "Buy" button**
-- In product card render: if `vendor_name` is empty/null but `external_url` exists, button label falls back to **"Buy at partner store"** instead of `"Buy at "` (broken string)
-- Same fallback applied to the "External source · VitalLogic doesn't control third-party claims" disclaimer wording where it references the vendor
+### 3. UI (single page)
+- Search box: filter by display name or email fragment
+- Table of users: `display_name`, `user_id` (truncated), current roles as badges
+- Per-row actions: toggle `expert` and `admin` chips (insert/delete in `user_roles`)
+- Cannot remove your own `admin` role (guard against locking yourself out)
+- Toast on success/failure; optimistic refresh of the row
 
-### Snapshot integrity (UAT recommendation #3, logic check)
-- Inspect `generate-prescription` edge function to confirm `external_url` is included in the per-line JSONB snapshot alongside `price` and `vendor_name`
-- If missing, add it so a patient's prescription stays functional even if the master catalog row is later edited
+### 4. Data wiring
+- List query joins `profiles` + aggregated `user_roles` per user (two queries client-side, merged in memory — small dataset, no need for an RPC yet)
+- Mutations: `supabase.from('user_roles').insert({ user_id, role })` and `.delete().eq(...)` — RLS + trigger enforces admin-only
 
-### Out of scope (acknowledged but no code change needed)
-- Healthy Habitat product ID backup column — defer until that connector is built (currently returns "no public feed")
-- Isha Life canonical URL check — the importer already stores Shopify's canonical `au.ishalife.com/products/{handle}` from the feed; verify in the function and only act if it's storing redirect URLs
+### 5. Navigation
+- Add "Admin · Roles" link in expert page header (only visible to admins)
 
-### Files likely touched
-- `src/components/consult/product-card.tsx` (rel attr, vendor fallback, TGA helper)
-- `src/components/expert/product-picker.tsx` (TGA helper, rel attr if applicable)
-- `src/lib/tga.ts` (new — AUST L normaliser + URL builder)
-- `supabase/functions/generate-prescription/index.ts` (snapshot includes external_url, if missing)
+### Files touched
+- New migration (admin SELECT on profiles)
+- New: `src/routes/_authenticated/_expert/expert_.admin.roles.tsx`
+- Edit: `src/routes/_authenticated/_expert/expert.tsx` (add admin-only nav link)
 
-### Verification once shipped
-1. Inspect product card on `/consult/:id/result` — "Buy at" button has `rel="noopener noreferrer"`, falls back to "Buy at partner store" when vendor blank
-2. Click "Verify on TGA" with both `"AUST L 123456"` and `"123456"` inputs — both resolve to the same valid TGA search URL
-3. Generate a fresh prescription, inspect `attached_products[0]` JSONB — confirms `external_url`, `price`, `vendor_name` all snapshotted
-4. No regression on `/expert/catalog` external links
+### Verification
+1. As admin → `/expert/admin/roles` lists all profiles, can grant/revoke `expert` and `admin`
+2. As expert (non-admin) → page shows "Admins only" guard
+3. Admin cannot remove own admin role (button disabled)
+4. Non-admin attempting direct insert via console → blocked by `guard_user_roles_write` trigger
+5. Newly granted expert can immediately access `/expert` queue
 
