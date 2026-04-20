@@ -310,6 +310,31 @@ function AdminAuditPage() {
     lines.push("## Role distribution");
     for (const r of roleCounts) lines.push(`- **${r.role}**: ${r.count}`);
     lines.push("");
+    if (obs) {
+      lines.push("## Observability (last 7 days)");
+      lines.push(`- Consults started: **${obs.consults7d}**`);
+      lines.push(`- Prescriptions generated: **${obs.prescriptions7d}**`);
+      lines.push(`- Prescriptions approved: **${obs.approved7d}**`);
+      lines.push(
+        `- Median review time: **${obs.medianReviewHours === null ? "—" : `${obs.medianReviewHours}h`}**`,
+      );
+      lines.push("");
+      lines.push("### Queue health");
+      lines.push(`- Pending: ${obs.pendingCount} (unclaimed: ${obs.unclaimedPending})`);
+      lines.push(`- Escalated: ${obs.escalatedCount}`);
+      lines.push(
+        `- Oldest pending age: ${obs.oldestPendingHours === null ? "—" : `${obs.oldestPendingHours}h`}`,
+      );
+      lines.push("");
+      lines.push("### Funnel (last 30d)");
+      for (const f of obs.funnel) lines.push(`- ${f.label}: **${f.count}**`);
+      lines.push("");
+      lines.push("### Active experts (last 7d)");
+      if (obs.activeExperts.length === 0) lines.push("_None._");
+      for (const e of obs.activeExperts)
+        lines.push(`- \`${e.expertId.slice(0, 8)}\` — ${e.reviews} review(s)`);
+      lines.push("");
+    }
     lines.push("## Checks");
     const byTrack = new Map<string, Check[]>();
     for (const c of checks) {
