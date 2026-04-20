@@ -374,6 +374,10 @@ Deno.serve(async (req) => {
       red_flags: string[];
       escalate: boolean;
       summary: string;
+      safety_filtered?: {
+        applied_flags: string[];
+        excluded_products: { name: string; reason: string }[];
+      };
     };
     try {
       draft = JSON.parse(toolCall.function.arguments);
@@ -384,6 +388,23 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Audit: attach the guardrails decision so reviewers (and the result page)
+    // can see what was filtered and why. This is part of the draft so it
+    // travels with the prescription through review.
+    const appliedFlags: string[] = [];
+    if (isPregnant) appliedFlags.push("pregnancy");
+    if (isUnder18) appliedFlags.push("under 18");
+    if (hasHyperthyroid) appliedFlags.push("hyperthyroidism");
+    if (hasAutoimmune) appliedFlags.push("autoimmune");
+    if (medsLower.trim()) appliedFlags.push("current medications");
+    draft.safety_filtered = {
+      applied_flags: appliedFlags,
+      excluded_products: excludedCatalog.slice(0, 50).map((p) => ({
+        name: p.product_name,
+        reason: p.excluded_reason ?? "",
+      })),
+    };
 
     const status =
       draft.escalate || (Array.isArray(draft.red_flags) && draft.red_flags.length > 0)
