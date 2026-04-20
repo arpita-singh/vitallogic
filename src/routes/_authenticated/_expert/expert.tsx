@@ -51,7 +51,8 @@ const TAB_LABELS: Record<Filter, string> = {
 
 function ExpertDashboard() {
   const { filter } = Route.useSearch();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
+  const isAdmin = hasRole("admin");
   const [items, setItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -162,6 +163,14 @@ function ExpertDashboard() {
             >
               Catalog review
             </Link>
+            {isAdmin ? (
+              <Link
+                to="/expert/admin/roles"
+                className="rounded-full border border-gold/40 px-3 py-1 text-[11px] uppercase tracking-wider text-gold hover:bg-gold/10"
+              >
+                Admin · Roles
+              </Link>
+            ) : null}
             <span className="text-xs uppercase tracking-wider text-muted-foreground">
               {items.length} {items.length === 1 ? "item" : "items"}
             </span>
