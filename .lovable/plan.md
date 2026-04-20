@@ -1,58 +1,50 @@
 
-Root cause is now clear from the network trace, not the partner feeds:
 
-- Clicking either import button sends `POST /_serverFn/...`
-- That request returns `401 Unauthorized: No authorization header provided`
-- `importMarketplaceProducts` is protected by `requireSupabaseAuth`, which only accepts a Bearer token from the request headers
-- The catalog page calls the server function directly from the client, so the auth header is not being forwarded
-- That thrown `Response` bubbles into the client as `Error: [object Response]`, which is why you get both the failed toast and the runtime error/blank-screen behavior
+User has provided a UAT report for Slice C (Proxy Fulfillment) with 3 specific bugs to verify and fix. Let me explore the relevant code first to scope what's actually there vs what needs fixing.
 
-So the bug is the auth transport for the import action, not the catalog route itself.
+Files to inspect:
+- `src/components/consult/product-card.tsx` — likely renders the "Buy at {vendor}" button + disclaimer
+- `src/routes/consult_.$consultId.result.tsx` — the page user is currently on, where the prescription renders
+- `src/components/expert/product-picker.tsx` — Expert AUST L handling
+- `supabase/functions/generate-prescription/index.ts` — snapshot logic (price, vendor, url)
 
-## Plan
+Let me check these to confirm bug presence before proposing the plan.
+<br>
 
-### 1. Replace the current import transport
-Stop calling the TanStack server function directly from `/expert/catalog` for this action.
+## Plan: Slice C UAT fixes — 3 verified bugs + snapshot integrity
 
-Instead, move marketplace ingestion behind a backend function invoked through the app’s authenticated backend client pattern, because that path already forwards the signed-in user’s JWT correctly.
+### Bugs to fix
 
-Why this approach:
-- it matches the existing `consult-access` pattern already used in the app
-- it avoids editing the generated auth middleware
-- it removes the `401 no authorization header` failure at the source
+**Bug 1 — External link security (`rel="noopener noreferrer"`)**
+- Audit every `<a target="_blank">` rendering an `external_url` (product card on patient result page, expert product picker preview, catalog row "view on partner")
+- Ensure all carry `rel="noopener noreferrer"` (catalog page already does; verify product card + any expert-side renderers)
 
-### 2. Move import logic into a dedicated backend function
-Create a new backend function for marketplace import that:
-- verifies the caller from the incoming JWT
-- checks `user_roles` and only allows `expert` or `admin`
-- keeps the current source-specific behavior:
-  - `isha_life`: fetch Shopify `products.json` with the User-Agent header, parse, insert/update staged rows
-  - `healthy_habitat`: return a clear “no public feed / manual connector required” result
-- always returns structured JSON (`ok`, `error`, counts, source), never a thrown raw `Response` for expected failures
+**Bug 2 — AUST L number resilience for TGA search link**
+- Wherever a TGA search URL is built from `aust_l_number`, normalise the value: strip the `AUST L ` prefix and all whitespace, keep digits only, then `encodeURIComponent` it
+- Centralise in a small helper (e.g. `src/lib/tga.ts` → `buildArtgSearchUrl(austL: string)`) so product card, expert picker, and catalog all use the same logic
+- Handles both `"AUST L 12345"` and `"12345"` inputs identically
 
-### 3. Update the catalog page to use the new backend client helper
-Change the import button handler in `/expert/catalog` so it:
-- calls a small client helper via the backend client
-- shows the exact returned message in the toast
-- preserves the loading spinner / disabled state
-- refreshes the pending-review list after a successful import
-- no longer falls into the runtime-error path on expected auth or partner failures
+**Bug 3 — Vendor name fallback on "Buy" button**
+- In product card render: if `vendor_name` is empty/null but `external_url` exists, button label falls back to **"Buy at partner store"** instead of `"Buy at "` (broken string)
+- Same fallback applied to the "External source · VitalLogic doesn't control third-party claims" disclaimer wording where it references the vendor
 
-### 4. Keep the UX resilient
-Tighten error handling so expected failures stay as normal UI feedback:
-- auth failure → friendly toast, no crash
-- Healthy Habitat unavailable feed → informative toast
-- partner non-JSON / blocked feed → informative toast
-- successful import → inserted / updated / unchanged counts
+### Snapshot integrity (UAT recommendation #3, logic check)
+- Inspect `generate-prescription` edge function to confirm `external_url` is included in the per-line JSONB snapshot alongside `price` and `vendor_name`
+- If missing, add it so a patient's prescription stays functional even if the master catalog row is later edited
 
-## Files likely touched
-- `src/routes/_authenticated/_expert/expert_.catalog.tsx`
-- `src/utils/marketplace-import.functions.ts` or a replacement client helper file
-- `supabase/functions/marketplace-import/index.ts` (new)
+### Out of scope (acknowledged but no code change needed)
+- Healthy Habitat product ID backup column — defer until that connector is built (currently returns "no public feed")
+- Isha Life canonical URL check — the importer already stores Shopify's canonical `au.ishalife.com/products/{handle}` from the feed; verify in the function and only act if it's storing redirect URLs
 
-## Verification after implementation
-1. Clicking either import button no longer calls `/_serverFn/...` with a missing auth header
-2. No `Error: [object Response]` runtime error appears
-3. Isha import either stages products successfully or returns a clear partner-feed error
-4. Healthy Habitat returns the intended “manual connector required” message
-5. `/expert/catalog` stays stable and refreshes pending-review rows after success
+### Files likely touched
+- `src/components/consult/product-card.tsx` (rel attr, vendor fallback, TGA helper)
+- `src/components/expert/product-picker.tsx` (TGA helper, rel attr if applicable)
+- `src/lib/tga.ts` (new — AUST L normaliser + URL builder)
+- `supabase/functions/generate-prescription/index.ts` (snapshot includes external_url, if missing)
+
+### Verification once shipped
+1. Inspect product card on `/consult/:id/result` — "Buy at" button has `rel="noopener noreferrer"`, falls back to "Buy at partner store" when vendor blank
+2. Click "Verify on TGA" with both `"AUST L 123456"` and `"123456"` inputs — both resolve to the same valid TGA search URL
+3. Generate a fresh prescription, inspect `attached_products[0]` JSONB — confirms `external_url`, `price`, `vendor_name` all snapshotted
+4. No regression on `/expert/catalog` external links
+
