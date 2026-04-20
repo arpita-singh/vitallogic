@@ -1,103 +1,78 @@
 
 
-The user is sharing rich content about Dr. Om Prakash 'Anand' from anandyoga.com — Panchang Yoga, Pancha Mahabhuta therapy, specialized protocols (color blindness, Parkinson's, Polio), authored bibliography, alternative modalities (mud therapy, magnet therapy, acupressure).
+The user is sketching the "Fulfillment Linker" — turn AI recommendations into live, in-stock buy buttons by syncing a partner marketplace's catalog into our `certified_materia_medica` table. They mention healthyhabitatmarket.com specifically.
 
-This is a **knowledge ingestion / RAG seed** request, not a UI feature. They want this expert's wisdom available to the consult AI as grounded reference material — the "Linker Module" they keep referencing.
+Let me check what's actually achievable here. The site is a Shopify-style storefront (based on the `/collections`, `/products` URL pattern they cite). Two ingestion paths:
 
-Let me think about scope. There are three things they're really asking for:
+1. **Shopify public JSON endpoint** — every Shopify store exposes `/products.json` and `/collections/{handle}/products.json` publicly, returning structured product data (title, handle, price, variants, images, vendor, in-stock status). No scraping, no API key, no Firecrawl needed.
+2. **Firecrawl scrape** — fallback if the site isn't Shopify or blocks the JSON endpoint.
 
-1. **Ingest** anandyoga.com content as structured reference material the AI can cite
-2. **Extend the schema** to handle non-herbal modalities (yoga limbs, elements therapy, mud, magnet, acupressure) and lifestyle protocols (daily schedules)
-3. **Authority/citation** — track that recommendations are sourced from Dr. Anand's tradition
+Let me also check what we already have in the catalog so I scope this right.
 
-I should NOT build the full RAG pipeline today — that's weeks of work (vector store, embeddings, retrieval ranking, citation UI). Instead: a focused first slice that lands the foundation and proves the pattern with this one source. Future sources slot into the same shape.
+I already know `certified_materia_medica` has: product_name, category, vendor_name, external_url, aust_l_number, artg_verified, source_authority, price, stock_status, description. So the schema already fits. What's missing is just the **ingestion pipeline** + a way to **refresh** stock/price periodically.
 
-Two real options on ingestion:
-- **(A) One-time scrape + curated insert** — use Firecrawl or fetch_website during plan execution, then INSERT structured rows into a new `wisdom_sources` + `wisdom_protocols` pair of tables. Manual quality > automated noise for the first source.
-- **(B) Live scrape on demand** — build a server function that hits Firecrawl per consult. Slow, costly, fragile.
+Three real questions worth being explicit about before building:
 
-(A) is right. Curated > live for high-trust health content.
+- **Auto vs review:** should imported products land directly in the live catalog (instant Buy Now), or in a staging area for an expert to approve/categorise first? Compliance-wise, the latter is much safer — the expert assigns category, source_authority, ARTG status, and writes the description before patients see it.
+- **Refresh cadence:** one-time import vs scheduled re-sync. v1 = on-demand button.
+- **AUST L matching:** Healthy Habitat product titles won't include AUST L numbers. Expert has to add those manually during review. Don't pretend we can auto-verify ARTG.
 
-Schema-wise, instead of jamming this into `certified_materia_medica` (which is product-shaped: stock_status, price, AUST L, vendor — none of that fits a yoga protocol), add two purpose-built tables.
+Recommend: **expert-reviewed import**, on-demand for v1. Avoids dumping uncurated SKUs into a clinical recommendation system.
 
-I should also clarify one thing before committing: do they want the AI to *automatically* recommend Dr. Anand's protocols inside generated prescriptions, or do they want a separate "Wisdom Library" surface that experts and patients can browse and that experts can manually attach (like the product picker)? Big design fork. I'll ask.
+Scope this tight: one server function that fetches the partner's `products.json`, dedupes against existing `external_url`s, inserts as **draft rows** (new column `import_status`), plus a small expert UI to review/approve them.
 
-Actually let me check the consult-chat function quickly to see how grounded context is currently passed to the AI.
+## Plan: Slice D — Marketplace ingestion v1 (Healthy Habitat Market)
 
-Looking at the codebase summary — `supabase/functions/consult-chat/index.ts` and `generate-prescription/index.ts` exist. They likely pull from `certified_materia_medica` for product grounding. The same pattern extends to a new `wisdom_protocols` table.
+### 1. Schema (one tiny migration)
+Add to `certified_materia_medica`:
+- `import_status text default 'live'` — `live` | `pending_review` | `rejected`
+- `import_source text nullable` — e.g. `healthyhabitatmarket.com`
+- `import_external_id text nullable` — Shopify product ID for dedupe on re-sync
+- Unique index on `(import_source, import_external_id)` to prevent duplicates
 
-Let me also consider whether to use Firecrawl. The user mentioned the site is bilingual (Hindi/English), small, and the structure is loose. `code--fetch_website` (already available, no connector needed) is enough for a first pass — handful of pages, manual curation, structured INSERTs. Firecrawl is overkill for one source.
+Update the patient-facing query (`product-card.tsx` flow / wherever the catalog is read for prescriptions) to filter `import_status = 'live'` so pending rows never reach patients. Existing rows default to `live` — no breakage.
 
-Asking one tight clarifying question, then planning.
+### 2. Ingestion server function
+New `src/utils/marketplace-import.functions.ts` exposing `importMarketplaceProducts`:
+- Input: `{ source: 'healthy_habitat', collection?: string, limit?: number }`
+- Fetches `https://healthyhabitatmarket.com/products.json?limit=250` (Shopify public endpoint — no auth)
+- For each product: map `title → product_name`, `vendor → vendor_name`, `variants[0].price → price`, `variants[0].available → stock_status`, build `external_url` from handle
+- Insert as `import_status = 'pending_review'` with `source_authority = 'clinical'` default and `category = 'uncategorised'` (expert sets these on review)
+- Skip products already present (matched on `import_source` + `import_external_id`) but UPDATE their price + stock_status (the "Price & Stock Tracker" the user asked for)
+- Server function only — uses `requireSupabaseAuth` middleware + checks the user has `expert` or `admin` role; rejects otherwise
+- Returns `{ inserted: n, updated: n, skipped: n }`
 
-## Plan: Wisdom ingestion v1 — Anandyoga as the seed source
+If the JSON endpoint fails or isn't Shopify, fall back to telling the expert "Use Firecrawl connector for this source" — don't silently break.
 
-### Decision needed first
-**Q:** When the AI generates a prescription, should Dr. Anand's protocols (yoga limbs, mud therapy, daily schedules) be **auto-suggested alongside herbal products** in the same draft, OR live in a **separate "Lifestyle & Practice" picker** that the expert chooses to attach? My recommendation is the latter — keeps the herbal/clinical pipeline clean, gives experts deliberate control over modality mixing, matches the existing product-picker UX. I'll proceed with **separate picker** unless you say otherwise.
+### 3. Expert review UI
+New route `src/routes/_authenticated/_expert/expert.catalog.tsx`:
+- "Import from Healthy Habitat Market" button → calls the server function
+- Table of `import_status = 'pending_review'` rows with inline editors for: category, source_authority, AUST L number, artg_verified, description
+- Per-row Approve (sets `import_status = 'live'`) or Reject (sets `import_status = 'rejected'`)
+- Live count: "{n} products awaiting review · last sync {date}"
 
-### Schema (one migration, two new tables)
+This is the human-in-the-loop checkpoint that keeps unverified SKUs out of patient prescriptions.
 
-**`wisdom_sources`** — provenance for everything ingested
-- `id uuid pk`
-- `name text` ("Dr. Om Prakash 'Anand' — Anand Yoga")
-- `tradition text` ("Panchang Yoga / Naturopathy")
-- `authority_url text` ("https://anandyoga.com")
-- `bibliography jsonb` — array of `{title, year}` for the ~50 books
-- `practitioner_count int`, `notes text`
-- `created_at`, `updated_at`
+### 4. Patient-facing UX (no new component)
+Once approved, products flow through the existing `product-picker.tsx` → `ProductCard` pipeline already shipped in Slice C. No changes needed — they get the deep link, snapshot timestamp, and ARTG Listed badge automatically.
 
-**`wisdom_protocols`** — atomic, attachable units of practice
-- `id uuid pk`, `source_id uuid → wisdom_sources`
-- `name text` (e.g. "Mitti Chikitsa — abdominal mud pack")
-- `name_native text` (Devanagari original)
-- `modality text` — enum-ish: `yoga` | `pranayama` | `element_therapy` | `mud_therapy` | `magnet_therapy` | `acupressure` | `shatkarma` | `daily_schedule`
-- `element text nullable` — `space` | `air` | `fire` | `water` | `earth` (for Pancha Mahabhuta mappings)
-- `indications text[]` — symptom/condition tags ("digestion", "anxiety", "cervical spondylitis", "color vision")
-- `contraindications text[]` — safety guardrails (pregnancy, hypertension, etc.)
-- `protocol_steps jsonb` — ordered steps, optional duration/time-of-day
-- `expected_outcome text`, `evidence_level text` (`empirical` | `traditional` | `clinical`)
-- `artg_relevant boolean default false` (most won't be — not a product)
-- `created_at`, `updated_at`
+### 5. Out of scope (deliberately)
+- **Scheduled sync / cron** — v1 is manual button. A nightly refresh is a 5-line follow-up using a server route + an external cron pinger (e.g. cron-job.org), but defer until we know which partners we actually want to sync.
+- **Multi-source** — wired for one source. Adding Isha Life or another Shopify store is just a new entry in a `MARKETPLACE_SOURCES` config map.
+- **Non-Shopify scraping** — would need the Firecrawl connector. Defer.
+- **Closed-loop "Buy Now → order tracking"** — partners own the cart. We just deep-link.
+- **Auto-AUST L verification** — TGA has no free product-lookup API; expert sets this manually during review.
 
-RLS mirrors `certified_materia_medica`: public read, expert/admin write.
+### Files I'll touch
+- New migration: 3 columns + unique index on `certified_materia_medica`
+- New `src/utils/marketplace-import.functions.ts` (server function)
+- New `src/routes/_authenticated/_expert/expert.catalog.tsx` (review UI)
+- Edit any place the catalog is queried for patients (`product-picker.tsx`, possibly `generate-prescription` edge function) to filter `import_status = 'live'`
 
-### Ingestion (one-shot, in default mode)
-- Use `code--fetch_website` to pull Anand Yoga's key sub-pages (Panchang Yog, Naturecure, Mitti Chikitsa, Daily Programme, About). No Firecrawl needed for one source.
-- Use `lovable_ai.py` (the AI-gateway skill) with a structured-output schema to extract `wisdom_protocols` rows from the markdown — modality, element, indications, steps. AI does the translation/structuring; I review and INSERT.
-- INSERT one `wisdom_sources` row + ~10–15 curated `wisdom_protocols` rows. Quality over volume.
-
-### Expert UI — minimal v1
-New component `src/components/expert/wisdom-picker.tsx` (mirrors `product-picker.tsx`):
-- Search by indication, modality, element
-- Shows source/tradition chip + evidence-level badge
-- Attaches snapshot into prescription's `attached_protocols` JSONB (new field on `prescriptions` — alongside `attached_products`, with the same `snapshot_at` immutability pattern)
-
-### Patient UI — minimal v1
-On `consult_.$consultId.result.tsx`, render attached protocols below the medications block as `<ProtocolCard />` (new component):
-- Modality + element chips
-- Step-by-step protocol
-- "Tradition: Panchang Yoga · Anand Yoga" attribution line linking to `authority_url`
-- Same `snapshot_at` "Catalog snapshot · {date}" timestamp for audit consistency
-
-### Out of scope (deliberately, for follow-up slices)
-- Vector embeddings / RAG retrieval — protocols are tag-searchable in v1; embeddings come when we have 3+ sources
-- Auto-attach by AI in `generate-prescription` — manual expert curation only in v1 (pending your answer above)
-- Multi-source ingestion pipeline / scheduled scraping
-- "Find a Practitioner" network feature
-- Bibliography → citation graph
-
-### Files I'll touch (in default mode after approval)
-- New migration: `wisdom_sources`, `wisdom_protocols`, RLS, plus `attached_protocols jsonb` column on `prescriptions`
-- Run fetch + AI structuring + INSERT for the seed data
-- `src/components/expert/wisdom-picker.tsx` (new)
-- `src/components/consult/protocol-card.tsx` (new)
-- `src/components/expert/recommendation-editor.tsx` — wire in wisdom picker + attached_protocols
-- `src/routes/consult_.$consultId.result.tsx` — render attached_protocols
-- `src/integrations/supabase/types.ts` regenerates automatically
-
-### Verification
-1. Migration runs; two new tables visible with RLS
-2. Seed ingestion produces 10+ Anand Yoga protocols, source row populated
-3. Expert opens prescription review → "Attach practice/protocol" alongside "Attach product" → searches "digestion" → sees Mitti Chikitsa from Anand Yoga with evidence chip → attaches
-4. Patient on result page sees the medication cards AND a new "Practices & Protocols" section with the snapshot timestamp + Anand Yoga attribution
+### Verification once shipped
+1. As expert, navigate to `/expert/catalog`, click "Import from Healthy Habitat Market" → see N products inserted with `pending_review` status
+2. Edit category + source_authority + AUST L on one row, click Approve → row becomes `live`
+3. Open the `product-picker` on a prescription draft → the newly approved product appears in search
+4. Re-run the import → existing products' prices/stock update; counts show "0 inserted, N updated"
+5. As patient, view a prescription with that product → existing Slice C flow renders the ARTG badge and deep link correctly
 
