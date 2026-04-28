@@ -1,34 +1,64 @@
+## Diagnosis
 
+The "Edge Function returned a non-2xx status code" toast on `/expert/consult/9f15a1e7…` is the `generate-prescription` function returning **HTTP 401 Unauthorized** (confirmed in edge logs: `POST | 401 | …/generate-prescription`, 886 ms).
 
-## What happened
-The 11 public-table CSVs exported correctly. `auth_users.csv` failed because the read-only Postgres role used for ad-hoc queries cannot read Supabase's `auth` schema — that's intentional protection so OAuth tokens, password hashes, and identities can't be exfiltrated by a SQL query.
+The function is not crashing — it is correctly rejecting the request based on its current auth rules:
 
-## Three ways forward — pick one
+```ts
+// supabase/functions/generate-prescription/index.ts (lines 163–182)
+let authorized = false;
+if (Bearer token user.id === consult.user_id) authorized = true;            // patient owner
+if (anonToken hash === consult.anon_token_hash) authorized = true;          // anonymous patient
+if (!authorized) return 401;
+```
 
-**Option A — Fix it server-side (recommended)** 
-Run a small one-off script that uses the service-role key (already configured as `SUPABASE_SERVICE_ROLE_KEY`) to call `supabase.auth.admin.listUsers()`. This is the official admin API, returns every user with `id`, `email`, `created_at`, `last_sign_in_at`, `email_confirmed_at`, `raw_user_meta_data`, `raw_app_meta_data`, and OAuth `identities`. Replaces the broken `auth_users.csv` in the existing zip. **Still no password hashes** — those are never returned by the API; they require the dashboard export path.
+There is **no branch that allows an expert or admin** to invoke this function. So when you (logged in as expert) click **Generate Prescription** on the expert consult page (which belongs to another user, or is anonymous), you get 401.
 
-**Option B — Dashboard export for everything auth-related**
-Lovable Cloud → Users → Export. Gives you a CSV with metadata *and* allows password-hash export for true lift-and-shift. This is the only path that preserves existing passwords on the local instance.
+The expert UI at `src/routes/_authenticated/_expert/expert_.consult.$consultId.tsx:78` calls `supabase.functions.invoke("generate-prescription", …)` with only the user's expert JWT — no `anonToken` and no role check on the server.
 
-**Option C — Skip auth migration entirely**
-Don't move `auth.users`. On the local instance, users re-sign-up (or you seed test accounts). Simplest if you're treating the local fork as a dev environment, not a production cutover.
+## Fix
 
-## My recommendation
-**Both A and B.** A gets you a clean machine-readable user list (emails, OAuth links, metadata) so you can script account re-creation. B gets you the password hashes so existing users don't have to reset.
+Add a third authorization branch to `generate-prescription/index.ts`: if the authenticated caller has the `expert` or `admin` role (via the existing `has_role()` security-definer Postgres function), allow the call.
 
-## What I'll do if you approve Option A
-1. Write a one-off Node script that uses `@supabase/supabase-js` with the service-role key to page through `auth.admin.listUsers()` (1000/page)
-2. Flatten each user to a CSV row with: `id, email, phone, created_at, last_sign_in_at, email_confirmed_at, raw_user_meta_data (JSON), raw_app_meta_data (JSON), identities (JSON)`
-3. Overwrite `/mnt/documents/exports/auth_users.csv` with the real data
-4. Rebuild `/mnt/documents/vital-logic-data-export.zip` so the bundle is correct
-5. Update the in-zip `README.txt` to note: "Password hashes not included — export separately via Lovable Cloud → Users → Export if needed"
-6. Re-emit the zip as a downloadable artifact
+### Change
 
-No code changes to the app, no schema changes, no new files in the repo.
+In `supabase/functions/generate-prescription/index.ts`, after the existing owner/anon checks and before the `if (!authorized)` reject:
 
-### Verification
-1. `auth_users.csv` opens with real rows (one per user) instead of an error message
-2. New zip contains the corrected `auth_users.csv` and all 11 public CSVs
-3. README explains the password-hash caveat clearly
+```ts
+// Allow staff (experts/admins) to draft on behalf of the patient.
+if (!authorized && authHeader.startsWith("Bearer ")) {
+  const token = authHeader.slice("Bearer ".length);
+  const { data: userData } = await supabase.auth.getUser(token);
+  const uid = userData?.user?.id;
+  if (uid) {
+    const [{ data: isExpert }, { data: isAdmin }] = await Promise.all([
+      supabase.rpc("has_role", { _user_id: uid, _role: "expert" }),
+      supabase.rpc("has_role", { _user_id: uid, _role: "admin" }),
+    ]);
+    if (isExpert === true || isAdmin === true) authorized = true;
+  }
+}
+```
 
+(We can also refactor to call `getUser` once and reuse, but the above keeps the diff tight.)
+
+No DB migration required — `has_role(uuid, app_role)` already exists and is used throughout RLS policies (`CLAUDE.md` → "Authorization").
+
+### Why not loosen RLS or change the client
+
+- The function uses the service-role key for DB access, so RLS is not the gate here — the in-function check is. Fix belongs in the function.
+- Sending the patient's `anonToken` from the expert UI would require leaking it to expert sessions, which we explicitly don't want.
+
+## Verification
+
+1. As an `expert`, open `/expert/consult/<anon consult id>` and click **Generate Prescription** → returns 200 with `{ prescriptionId, status }` and inserts a row in `prescriptions`.
+2. As an `expert`, click again → still returns 200 (idempotency short-circuit on existing pending/approved draft).
+3. As a logged-out random user calling the function directly → still 401.
+4. As a signed-in `user` (not expert) on someone else's consult → still 401.
+5. As the consult's owner (patient) → still 200 (existing path unchanged).
+
+## Files touched
+
+- `supabase/functions/generate-prescription/index.ts` — add staff role auth branch (~10 lines).
+
+No other files, no schema changes.
