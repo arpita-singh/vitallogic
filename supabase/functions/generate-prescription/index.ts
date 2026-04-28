@@ -174,6 +174,19 @@ Deno.serve(async (req) => {
       const candidate = await sha256Hex(anonToken);
       if (candidate === consult.anon_token_hash) authorized = true;
     }
+    // Allow staff (experts/admins) to draft on behalf of the patient.
+    if (!authorized && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.slice("Bearer ".length);
+      const { data: userData } = await supabase.auth.getUser(token);
+      const uid = userData?.user?.id;
+      if (uid) {
+        const [{ data: isExpert }, { data: isAdmin }] = await Promise.all([
+          supabase.rpc("has_role", { _user_id: uid, _role: "expert" }),
+          supabase.rpc("has_role", { _user_id: uid, _role: "admin" }),
+        ]);
+        if (isExpert === true || isAdmin === true) authorized = true;
+      }
+    }
     if (!authorized) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
