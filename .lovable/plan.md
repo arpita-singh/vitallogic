@@ -41,3 +41,5 @@ Reply "done" and I'll make a tiny no-op commit (e.g. a comment in `.lovable/plan
 
 ## Optional cleanup before switching
 The throwaway script `tmp_export_users.mjs` from the user-export task is still in the repo root. Want me to delete it before the next sync so it doesn't propagate to `lovableAI`? (Yes/no in your reply.)
+
+<!-- branch-sync verification ping: 2026-04-28 — if this commit appears on lovableAI (not main), the default-branch swap worked. -->
