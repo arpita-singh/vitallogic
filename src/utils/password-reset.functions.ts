@@ -34,40 +34,19 @@ const inputSchema = z.object({
 export type PasswordResetStatus = "sent" | "not_registered" | "rate_limited" | "error";
 
 async function emailExists(email: string): Promise<boolean> {
-  // listUsers doesn't support filtering by email directly; use the
-  // generateLink admin API which fails cleanly for unknown users, OR
-  // page through users. We use a paginated scan capped at a few pages
-  // — Supabase admin doesn't expose a direct lookup, but for typical
-  // project sizes this is acceptable. For larger projects, swap to a
-  // direct query against auth.users via supabaseAdmin (service role
-  // bypasses RLS).
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .limit(1);
-  // Fallback: look up by email through auth admin if profiles isn't useful.
-  // We do the real check via the auth admin API:
-  void data;
-  void error;
-
-  // Use the admin API to find user by email.
-  // @ts-expect-error - getUserByEmail is available in supabase-js v2 admin
-  if (typeof supabaseAdmin.auth.admin.getUserByEmail === "function") {
-    // @ts-expect-error - see above
-    const res = await supabaseAdmin.auth.admin.getUserByEmail(email);
-    if (res?.data?.user) return true;
-    return false;
-  }
-
-  // Fallback: paginate listUsers (max 1000/page). Cap at 10 pages = 10k users.
+  // Supabase admin API doesn't expose a direct "find by email" call in a
+  // stable, typed way across versions. Page through listUsers (max
+  // 1000/page). Cap at 10 pages = 10k users, which is plenty for this
+  // project. For larger user bases, swap this for a direct query against
+  // auth.users via the service-role client.
+  const target = email.toLowerCase();
   for (let page = 1; page <= 10; page++) {
     const { data: list, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
       page,
       perPage: 1000,
     });
     if (listErr) throw listErr;
-    const found = list.users.some((u) => u.email?.toLowerCase() === email);
-    if (found) return true;
+    if (list.users.some((u) => u.email?.toLowerCase() === target)) return true;
     if (list.users.length < 1000) break;
   }
   return false;
