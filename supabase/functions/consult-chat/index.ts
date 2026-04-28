@@ -4,15 +4,15 @@
 // (b) a valid bearer JWT for the consult's owner.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { z } from "https://esm.sh/zod@3.23.8";
-import { streamChat } from "../_shared/llm.ts";
+import { streamChat, embed } from "../_shared/llm.ts";
 
 // Length caps mirror src/lib/consult-schema.ts. Keep these in sync.
 // TODO: longer term, load message history from the DB instead of trusting
 // the client-supplied array — this would close the conversation-history
 // injection vector entirely. Out of scope for this pass.
 const MAX_MESSAGES = 50;
-const MAX_MESSAGE_CHARS = 4000;
-const MAX_TOTAL_CHARS = 30_000;
+const MAX_MESSAGE_CHARS = 40000;
+const MAX_TOTAL_CHARS = 100000;
 
 const BodySchema = z.object({
   consultId: z.string().uuid(),
@@ -97,9 +97,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+	const supabase = createClient(
+      Deno.env.get("CUSTOM_DB_URL") ?? Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("CUSTOM_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
     // Authorize: caller must be the signed-in owner OR present a valid anonToken.
@@ -140,8 +140,41 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- Vector Search (RAG) ---
+    let contextMessage = "";
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+
+    if (lastUserMessage?.content) {
+      try {
+        const queryEmbedding = await embed(lastUserMessage.content);
+        const { data: matches, error: matchErr } = await supabase.rpc("match_knowledge", {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.5, // slightly more permissive for medical text
+          match_count: 5,
+        });
+
+        if (matchErr) {
+          console.error("Vector search RPC failed", matchErr);
+        } else if (matches && matches.length > 0) {
+          const contextBlocks = matches.map((m: any) => 
+            `SOURCE: ${m.metadata?.source ?? 'Unknown'} (Page ${m.metadata?.page ?? '?'})\nCONTENT: ${m.content}`
+          );
+          contextMessage = "You have access to the following relevant passages from the Charaka Samhita and other classical texts. Use this specific wisdom to ground your response, but always stay in your warm, unhurried voice:\n\n" + contextBlocks.join("\n\n---\n\n");
+        }
+      } catch (e) {
+        console.error("Vector search failed (embedding error)", e);
+        // Fallback: proceed without context rather than failing the chat
+      }
+    }
+
+    const finalMessages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...(contextMessage ? [{ role: "system", content: contextMessage }] : []),
+      ...messages,
+    ];
+
     const upstream = await streamChat({
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      messages: finalMessages as any,
     });
 
     if (!upstream.ok) {
