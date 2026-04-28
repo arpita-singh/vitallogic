@@ -18,6 +18,7 @@ import { Route as OriginsRouteImport } from './routes/origins'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as JourneyRouteImport } from './routes/journey'
 import { Route as IntegrityRouteImport } from './routes/integrity'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as ConsultRouteImport } from './routes/consult'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
@@ -78,6 +79,11 @@ const JourneyRoute = JourneyRouteImport.update({
 const IntegrityRoute = IntegrityRouteImport.update({
   id: '/integrity',
   path: '/integrity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConsultRoute = ConsultRouteImport.update({
@@ -169,6 +175,7 @@ const AuthenticatedExpertExpertAdminAuditRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/consult': typeof ConsultRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -194,6 +201,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/consult': typeof ConsultRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -220,6 +228,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/consult': typeof ConsultRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/integrity': typeof IntegrityRoute
   '/journey': typeof JourneyRoute
   '/login': typeof LoginRoute
@@ -248,6 +257,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/consult'
+    | '/forgot-password'
     | '/integrity'
     | '/journey'
     | '/login'
@@ -273,6 +283,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/consult'
+    | '/forgot-password'
     | '/integrity'
     | '/journey'
     | '/login'
@@ -298,6 +309,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/consult'
+    | '/forgot-password'
     | '/integrity'
     | '/journey'
     | '/login'
@@ -326,6 +338,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   ConsultRoute: typeof ConsultRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   IntegrityRoute: typeof IntegrityRoute
   JourneyRoute: typeof JourneyRoute
   LoginRoute: typeof LoginRoute
@@ -402,6 +415,13 @@ declare module '@tanstack/react-router' {
       path: '/integrity'
       fullPath: '/integrity'
       preLoaderRoute: typeof IntegrityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/consult': {
@@ -577,6 +597,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   ConsultRoute: ConsultRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   IntegrityRoute: IntegrityRoute,
   JourneyRoute: JourneyRoute,
   LoginRoute: LoginRoute,
